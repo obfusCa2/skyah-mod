@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "skyah",
+  "version": "${version}",
+  "name": "SkyAH Flips",
+  "description": "Live SkyAH auction deals in your chat.",
+  "authors": ["SkyAH"],
+  "license": "MIT",
+  "contact": {
+    "homepage": "https://skyah.net/api",
+    "sources": "https://github.com/obfusCa2/skyah-mod"
+  },
+  "environment": "client",
+  "entrypoints": {
+    "client": ["net.skyah.mod.SkyAhMod"],
+    "modmenu": ["net.skyah.mod.SkyAhModMenu"]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=25"
+  }
+}
