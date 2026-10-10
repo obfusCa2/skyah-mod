@@ -15,7 +15,7 @@ public class SkyAhConfig {
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("skyah.json");
     public static final String DEFAULT_URL = "wss://skyah.net/item-api/ws/v1/flips";
     /** Older files are migrated in load(). */
-    static final int CURRENT_VERSION = 2;
+    static final int CURRENT_VERSION = 3;
 
     /** 0 = written by a mod before versioned configs. */
     public int configVersion = 0;
@@ -27,7 +27,9 @@ public class SkyAhConfig {
     public long maxPrice = 0;
     /** Also cap the price at the coins in your purse (read from the sidebar). */
     public boolean maxPriceFromPurse = false;
-    /** Hide deals whose build sells less often than this (0 = off). */
+    /** Hide deals whose estimated sell time is longer than this (seconds, 0 = off). */
+    public long maxSellTimeS = 0;
+    /** No longer used by the filters (kept so old files and profile codes load). */
     public double minSalesPerDay = 0;
     public String whitelist = "";
     public String blacklist = "";
@@ -44,7 +46,7 @@ public class SkyAhConfig {
     public boolean showBin = true;
     public boolean showAuctions = true;
     public boolean showReplay = false;
-    // all | above | below | has
+    /** No longer used by the filters: the profit already counts the cheapest listing. */
     public String floorFilter = "all";
 
     // What the chat line shows. Profit is always shown.
@@ -85,6 +87,7 @@ public class SkyAhConfig {
         maxPrice = d.maxPrice;
         maxPriceFromPurse = d.maxPriceFromPurse;
         minSalesPerDay = d.minSalesPerDay;
+        maxSellTimeS = d.maxSellTimeS;
         showVolume = d.showVolume;
         showSellTime = d.showSellTime;
         floorFilter = d.floorFilter;
@@ -105,22 +108,32 @@ public class SkyAhConfig {
         activeProfile = "";
     }
 
-    /** Version 1 files: the old default color rules lose their percent
-     *  condition, and sound keeps playing for every deal. */
+    /** Version 1: the old default color rules lose their percent condition,
+     *  and sound keeps playing for every deal. Version 2: filters without a
+     *  button any more (floor, sales per day, profit at target) go neutral, so
+     *  nothing hides deals invisibly. */
     void migrate() {
         if (configVersion >= CURRENT_VERSION) {
             return;
         }
-        if (colorRules != null && colorRules.size() == 3
-                && isRule(colorRules.get(0), 50_000_000L, 200)
-                && isRule(colorRules.get(1), 10_000_000L, 100)
-                && isRule(colorRules.get(2), 1_000_000L, 50)) {
-            for (ColorRule r : colorRules) {
-                r.minPct = 0;
+        if (configVersion < 2) {
+            if (colorRules != null && colorRules.size() == 3
+                    && isRule(colorRules.get(0), 50_000_000L, 200)
+                    && isRule(colorRules.get(1), 10_000_000L, 100)
+                    && isRule(colorRules.get(2), 1_000_000L, 50)) {
+                for (ColorRule r : colorRules) {
+                    r.minPct = 0;
+                }
+                SkyAhLog.add("config: old color rules migrated (percent condition removed)");
             }
-            SkyAhLog.add("config: old color rules migrated (percent condition removed)");
+            soundMinProfit = 0L;
         }
-        soundMinProfit = 0L;
+        if (configVersion < 3) {
+            floorFilter = "all";
+            minSalesPerDay = 0;
+            useRealProfit = true;
+            SkyAhLog.add("config: floor, sales per day and profit mode reset (no longer in the menu)");
+        }
         configVersion = CURRENT_VERSION;
     }
 

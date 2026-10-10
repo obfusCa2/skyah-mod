@@ -150,8 +150,8 @@ public class FlipChat {
         if (cap > 0 && flip.price > cap) {
             return false;
         }
-        // Unknown volume (older frames) never hides a deal.
-        if (cfg.minSalesPerDay > 0 && flip.salesPerDay != null && flip.salesPerDay < cfg.minSalesPerDay) {
+        // Unknown sell time never hides a deal.
+        if (cfg.maxSellTimeS > 0 && flip.sellTimeS != null && flip.sellTimeS > cfg.maxSellTimeS) {
             return false;
         }
         if (cfg.whitelist != null && !cfg.whitelist.isBlank() && !matchesList(cfg.whitelist, flip)) {
@@ -164,17 +164,7 @@ public class FlipChat {
         if (bin && !cfg.showBin) {
             return false;
         }
-        if (!bin && !cfg.showAuctions) {
-            return false;
-        }
-        String mode = cfg.floorFilter == null ? "all" : cfg.floorFilter;
-        if ("has".equals(mode) && flip.floor == null) {
-            return false;
-        }
-        if ("above".equals(mode) && !"above".equals(flip.floorVsTarget)) {
-            return false;
-        }
-        return !"below".equals(mode) || "below".equals(flip.floorVsTarget);
+        return bin || cfg.showAuctions;
     }
 
     /** Max price after the purse limit; 0 = no limit. Unknown purse = no purse limit. */

@@ -21,6 +21,7 @@ import java.util.function.Supplier;
  *  and on close. */
 abstract class SkyAhScreen extends Screen {
     protected static final int WHITE = 0xFFFFFFFF;
+    protected static final String BACK_TIP = " Right click: one step back.";
     /** Chat's default width; the preview wraps like chat does. */
     private static final int CHAT_WIDTH = 320;
 
@@ -96,6 +97,24 @@ abstract class SkyAhScreen extends Screen {
 
     protected Button button(int x, int y, int w, String label, String tip, Button.OnPress press) {
         return button(x, y, w, Component.literal(label), tip, press);
+    }
+
+    /** Button that cycles a value: left click next, right click back. */
+    protected Button step(int x, int y, int w, Supplier<Component> label, String tip, Runnable next, Runnable back) {
+        StepButton[] self = new StepButton[1];
+        self[0] = new StepButton(x, y, w, H, label.get(), b -> {
+            next.run();
+            changed();
+            b.setMessage(label.get());
+        }, () -> {
+            back.run();
+            changed();
+            self[0].setMessage(label.get());
+        });
+        if (tip != null) {
+            self[0].setTooltip(Tooltip.create(Component.literal(tip + BACK_TIP)));
+        }
+        return addRenderableWidget(self[0]);
     }
 
     protected Button toggle(int x, int y, int w, String label, String tip,
@@ -217,8 +236,12 @@ abstract class SkyAhScreen extends Screen {
                     .withStyle(ChatFormatting.GRAY));
         }
         if (!cfg.hasKey()) {
-            return out.append(dot(ChatFormatting.YELLOW)).append(Component.literal("No API key yet: open Account & key")
+            return out.append(dot(ChatFormatting.YELLOW)).append(Component.literal("No key yet: open Account & key")
                     .withStyle(ChatFormatting.YELLOW));
+        }
+        if (SkyAhKey.isInactive()) {
+            return out.append(dot(ChatFormatting.RED)).append(Component.literal("Key inactive: activate it on skyah.net/api (one bid)")
+                    .withStyle(ChatFormatting.RED));
         }
         if (!open) {
             String why = socket == null ? "" : socket.lastCloseLabel();
@@ -226,13 +249,18 @@ abstract class SkyAhScreen extends Screen {
                     .withStyle(ChatFormatting.RED));
         }
         out.append(dot(ChatFormatting.GREEN)).append(Component.literal("Connected").withStyle(ChatFormatting.GREEN));
+        String left = SkyAhKey.leftText();
+        if (left != null) {
+            out.append(Component.literal(" · key ").withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal(left + " left").withStyle(SkyAhKey.dueSoon() ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
+        }
         long last = socket.lastMessageAt;
         if (last > 0) {
             long secs = Math.max(0, (System.currentTimeMillis() - last) / 1000);
             out.append(Component.literal(" · last deal " + (secs < 60 ? secs + "s" : secs / 60 + "m") + " ago")
                     .withStyle(ChatFormatting.GRAY));
         }
-        out.append(Component.literal(" · " + SkyAhStats.shownCount() + " shown").withStyle(ChatFormatting.GRAY));
+        out.append(Component.literal(" · " + SkyAhStats.shownCount() + " deals shown").withStyle(ChatFormatting.GRAY));
         return out;
     }
 

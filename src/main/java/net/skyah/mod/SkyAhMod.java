@@ -13,6 +13,7 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -30,19 +31,24 @@ import java.util.regex.Pattern;
 
 public class SkyAhMod implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("skyah");
-    public static final String VERSION = "0.2.1";
+    public static final String VERSION = "0.3.0";
     /** Build tag in the log, so a log shows which jar was running. */
-    public static final String BUILD = "gen20";
+    public static final String BUILD = "gen21";
     public static SkyAhConfig CONFIG;
     public static FlipsSocket SOCKET;
     /** Deal hotkey, unbound until the player picks a key (K menu or Controls). */
     public static KeyMapping OPEN_KEY;
+    /** The menu key (K by default), named in chat hints. */
+    public static KeyMapping MENU_KEY;
 
     private static final Gson GSON = new Gson();
     private static final Pattern PURCHASE_RE = Pattern.compile(
             "(?i)^(?:\\[Auction\\]\\s*)?(?:You\\s+)?(?:bought|purchased)\\s+(.+?)\\s+for\\s+([\\d,]+)\\s+coins");
     private static volatile String lastPurchaseKey = "";
     private static volatile long lastPurchaseAt = 0L;
+    private static String lastSettingsJson = null;
+    private static long lastSettingsAt = 0L;
+    private static int settingsTicks = 0;
 
     @Override
     public void onInitializeClient() {
@@ -52,7 +58,7 @@ public class SkyAhMod implements ClientModInitializer {
         if (CONFIG.enabled) {
             SOCKET.start();
         }
-        KeyMapping menuKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+        KeyMapping menuKey = MENU_KEY = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.skyah.menu", keyboardType(), InputConstants.KEY_K,
                 KeyMapping.Category.MISC));
         OPEN_KEY = KeyMappingHelper.registerKeyMapping(new KeyMapping(
@@ -67,7 +73,10 @@ public class SkyAhMod implements ClientModInitializer {
             }
             SkyAhPurse.tick(client);
             SkyAhOpenTracker.tick();
-            maybeActivationReminder(client);
+            if (++settingsTicks % 100 == 0) {
+                sendSettings(false);
+            }
+            SkyAhKey.tick(client);
         });
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (!overlay) {
@@ -159,19 +168,48 @@ public class SkyAhMod implements ClientModInitializer {
         SkyAhLog.add((sent ? "purchase sent: " : "purchase (offline): ") + name + " " + FlipChat.fmt(price));
     }
 
-    /** Filter and chat settings, for usage stats. */
+    /** Settings for usage stats: all of them on connect (force), then only
+     *  when something changed. Checked every 5 s, so changes made under
+     *  Options > Controls count too; at most one message per 6 s. */
     public static void sendSettings() {
+        sendSettings(false);
+    }
+
+    static synchronized void sendSettings(boolean force) {
         if (SOCKET == null || !SOCKET.isOpen()) {
             return;
         }
+        String json = GSON.toJson(settingsMessage());
+        long now = System.currentTimeMillis();
+        if (!force && (json.equals(lastSettingsJson) || now - lastSettingsAt < 6_000L)) {
+            return;
+        }
+        if (SOCKET.send(json)) {
+            lastSettingsJson = json;
+            lastSettingsAt = now;
+            SkyAhLog.add("settings synced");
+        }
+    }
+
+    private static String modVersionOf(String id) {
+        return FabricLoader.getInstance().getModContainer(id)
+                .map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("");
+    }
+
+    private static Map<String, Object> settingsMessage() {
         Map<String, Object> msg = new LinkedHashMap<>();
         msg.put("type", "settings");
         msg.put("version", VERSION);
+        msg.put("build", BUILD);
+        msg.put("minecraft", modVersionOf("minecraft"));
+        msg.put("loader", modVersionOf("fabricloader"));
+        msg.put("hotkey", OPEN_KEY == null ? "" : OPEN_KEY.saveString());
         msg.put("minProfit", CONFIG.minProfit);
         msg.put("minPct", CONFIG.minPct);
         msg.put("maxPrice", CONFIG.maxPrice);
         msg.put("maxPriceFromPurse", CONFIG.maxPriceFromPurse);
         msg.put("minSalesPerDay", CONFIG.minSalesPerDay);
+        msg.put("maxSellTimeS", CONFIG.maxSellTimeS);
         msg.put("whitelist", CONFIG.whitelist);
         msg.put("blacklist", CONFIG.blacklist);
         msg.put("sound", CONFIG.sound);
@@ -193,41 +231,10 @@ public class SkyAhMod implements ClientModInitializer {
         msg.put("useRealProfit", CONFIG.useRealProfit);
         msg.put("floorFilter", CONFIG.floorFilter);
         msg.put("colorRules", CONFIG.colorRules);
-        if (SOCKET.send(GSON.toJson(msg))) {
-            SkyAhLog.add("settings synced");
-        }
-    }
-
-    /** Chat reminder while the key is inactive (4402), at most every 5 min. */
-    private static long lastActivationReminder = 0L;
-
-    private static void maybeActivationReminder(Minecraft client) {
-        FlipsSocket socket = SOCKET;
-        if (socket == null || client.player == null) {
-            return;
-        }
-        if (socket.isOpen()) {
-            lastActivationReminder = 0L;
-            return;
-        }
-        if (socket.lastCloseCode != 4402) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        if (lastActivationReminder != 0L && now - lastActivationReminder < 5 * 60_000L) {
-            return;
-        }
-        lastActivationReminder = now;
-        Component link = Component.literal("activate on skyah.net/api")
-                .withStyle(Style.EMPTY
-                        .withColor(ChatFormatting.AQUA)
-                        .withUnderlined(true)
-                        .withClickEvent(new ClickEvent.OpenUrl(
-                                java.net.URI.create("https://skyah.net/api"))));
-        client.player.sendSystemMessage(
-                Component.literal("[SkyAH] Key inactive - ").withStyle(ChatFormatting.YELLOW)
-                        .append(link)
-                        .append(Component.literal(" (one bid, no new key)").withStyle(ChatFormatting.GRAY)));
+        msg.put("soundName", CONFIG.soundName);
+        msg.put("activeProfile", CONFIG.activeProfile);
+        msg.put("profiles", CONFIG.profiles == null ? 0 : CONFIG.profiles.size());
+        return msg;
     }
 
     /** Copy the whole in-memory log to the clipboard (chat is optional). */
@@ -286,7 +293,10 @@ public class SkyAhMod implements ClientModInitializer {
                         .then(ClientCommands.literal("logs").executes(ctx -> {
                             printLogs();
                             return 1;
-                        }))
+                        }).then(ClientCommands.literal("copy").executes(ctx -> {
+                            copyLogs();
+                            return 1;
+                        })))
                         .then(ClientCommands.literal("latency").executes(ctx -> {
                             ctx.getSource().sendFeedback(Component.literal(
                                     "SkyAH latency: " + SkyAhLatency.summary()
@@ -398,6 +408,7 @@ public class SkyAhMod implements ClientModInitializer {
                                             String k = StringArgumentType.getString(ctx, "key").trim();
                                             CONFIG.apiKey = k;
                                             CONFIG.save();
+                                            SkyAhKey.reset();
                                             SOCKET.restart();
                                             ctx.getSource().sendFeedback(Component.literal(
                                                     "SkyAH: key set (" + k.length() + " chars), reconnecting"));

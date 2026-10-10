@@ -11,17 +11,17 @@ import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 /** Which deals show up. Every field writes into the live config while you
- *  type. The top line counts what the filters keep. */
+ *  type. The top line counts what the filters keep. Profit always uses the
+ *  real sell price (recent sales, or the cheapest listing when lower). */
 public class SkyAhFiltersScreen extends SkyAhScreen {
     private static final long[] PROFIT_STEPS = {0L, 500_000L, 1_000_000L, 2_000_000L, 5_000_000L,
             10_000_000L, 25_000_000L, 50_000_000L};
     private static final long[] PCT_STEPS = {0, 5, 10, 15, 20, 30, 50};
-    private static final long[] PRICE_STEPS = {0L, 5_000_000L, 10_000_000L, 50_000_000L, 100_000_000L,
-            500_000_000L, 1_000_000_000L};
-    private static final String[] FLOOR_MODES = {"all", "above", "below", "has"};
-
-    private static final double[] SALES_STEPS = {0, 0.5, 1, 3, 10, 30};
-    private Button purseBtn;
+    /** Max price steps; the second one is "my purse". */
+    private static final long[] PRICE_STEPS = {0L, -1L, 10_000_000L, 50_000_000L, 100_000_000L, 500_000_000L, 1_000_000_000L};
+    private static final long[] SELL_WITHIN = {0L, 86_400L, 21_600L, 7_200L, 1_800L};
+    private static final boolean[][] DEAL_TYPES = {{true, true}, {true, false}, {false, true}};
+    private Button priceBtn;
 
     public SkyAhFiltersScreen(Screen parent) {
         super("Filters", parent);
@@ -30,32 +30,9 @@ public class SkyAhFiltersScreen extends SkyAhScreen {
     @Override
     public void tick() {
         super.tick();
-        if (purseBtn != null) {
-            purseBtn.setMessage(purseLabel(cfg()));
+        if (priceBtn != null) {
+            priceBtn.setMessage(valued("Max price", maxPriceLabel(cfg())));   // the purse changes
         }
-    }
-
-    private static Component purseLabel(SkyAhConfig cfg) {
-        if (!cfg.maxPriceFromPurse) {
-            return Component.literal("Purse limit: ").append(Component.literal("OFF").withStyle(ChatFormatting.GRAY));
-        }
-        long purse = SkyAhPurse.get();
-        return Component.literal("Purse limit: ").append(Component.literal(
-                purse >= 0 ? "ON (" + FlipChat.fmt(purse) + ")" : "ON (no purse seen)").withStyle(
-                purse >= 0 ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
-    }
-
-    static String salesLabel(SkyAhConfig cfg) {
-        return cfg.minSalesPerDay > 0 ? "from " + FlipChat.rate(cfg.minSalesPerDay) : "any";
-    }
-
-    private static double nextSales(double cur) {
-        for (double s : SALES_STEPS) {
-            if (s > cur + 1e-9) {
-                return s;
-            }
-        }
-        return SALES_STEPS[0];
     }
 
     @Override
@@ -71,81 +48,26 @@ public class SkyAhFiltersScreen extends SkyAhScreen {
         y += GAP;
         pctRow(y);
         y += GAP;
-        coinRow(y, "Max price", "no limit", PRICE_STEPS,
-                "Hide deals that cost more than this. Empty = no limit.",
-                () -> cfg.maxPrice, v -> cfg.maxPrice = v);
-        y += GAP;
-        purseBtn = button(X, y, half(), purseLabel(cfg),
-                "Also hides deals that cost more than the coins in your purse, read from the "
-                        + "Hypixel sidebar every second. Works together with Max price. "
-                        + "If no purse is visible (not on SkyBlock), nothing is hidden by it.",
-                b -> {
-                    cfg.maxPriceFromPurse = !cfg.maxPriceFromPurse;
-                    changed();
-                    b.setMessage(purseLabel(cfg));
-                });
-        button(right(), y, half(), valued("Sales/day", salesLabel(cfg)),
-                "Hide deals whose build sells less often than this per day (comparable sales, "
-                        + "last 3 days). Deals without this number are never hidden. "
-                        + "Most deals sell 5 to 70 times a day.",
-                b -> {
-                    cfg.minSalesPerDay = nextSales(cfg.minSalesPerDay);
-                    changed();
-                    b.setMessage(valued("Sales/day", salesLabel(cfg)));
-                });
-        y += GAP;
-
-        button(X, y, half(), valued("Deals", dealType(cfg)),
+        priceBtn = step(X, y, half(), () -> valued("Max price", maxPriceLabel(cfg)),
+                "Hides deals that cost more. My purse: reads the coins in your sidebar every second, "
+                        + "so you only see what you can buy right now.",
+                () -> setPriceStep(cfg, priceIndex(cfg) + 1),
+                () -> setPriceStep(cfg, priceIndex(cfg) < 0 ? 0 : priceIndex(cfg) - 1));
+        step(right(), y, half(), () -> valued("Deals", dealType(cfg)),
                 "BIN: buy instantly. Auction: you have to bid and may be outbid.",
-                b -> {
-                    if (cfg.showBin && cfg.showAuctions) {
-                        cfg.showAuctions = false;
-                    } else if (cfg.showBin) {
-                        cfg.showBin = false;
-                        cfg.showAuctions = true;
-                    } else {
-                        cfg.showBin = true;
-                        cfg.showAuctions = true;
-                    }
-                    changed();
-                    b.setMessage(valued("Deals", dealType(cfg)));
-                });
-        button(right(), y, half(), valued("Profit", profitMode(cfg)),
-                "Safe: profit if you sell at the lower of sell target and floor, fees included. "
-                        + "At target: profit at the recent sales average. Filters, colors and the chat line all use this.",
-                b -> {
-                    cfg.useRealProfit = !cfg.useRealProfit;
-                    changed();
-                    b.setMessage(valued("Profit", profitMode(cfg)));
-                });
+                () -> setDealType(cfg, typeIndex(cfg) + 1),
+                () -> setDealType(cfg, typeIndex(cfg) + DEAL_TYPES.length - 1));
         y += GAP;
-        button(X, y, W, valued("Floor", floorLabel(cfg.floorFilter)),
-                "Floor = the cheapest comparable BIN listed right now. "
-                        + "'Not below target': nobody undercuts your sell target (safest). "
-                        + "'Below target': someone sells cheaper than the target. "
-                        + "'Must exist': only deals where a comparable BIN was found.",
-                b -> {
-                    cfg.floorFilter = next(cfg.floorFilter);
-                    changed();
-                    b.setMessage(valued("Floor", floorLabel(cfg.floorFilter)));
-                });
-        y += GAP;
-
-        int labelW = 70;
-        label(X, y, "Only items");
-        box(X + labelW, y, W - labelW, cfg.whitelist, "e.g. hyperion, juju (empty = all)", 400, s -> {
-            cfg.whitelist = s;
-            changed();
-        }).setTooltip(Tooltip.create(Component.literal(
-                "Comma separated. Item id or part of the name. Empty = every item.")));
-        y += GAP;
-        label(X, y, "Never items");
-        box(X + labelW, y, W - labelW, cfg.blacklist, "e.g. dye, rune", 400, s -> {
-            cfg.blacklist = s;
-            changed();
-        }).setTooltip(Tooltip.create(Component.literal(
-                "Comma separated. These items never show, even if they are on the first list.")));
-        y += GAP + 6;
+        step(X, y, half(), () -> valued("Sells within", sellWithinLabel(cfg.maxSellTimeS)),
+                "Hides items that usually take longer to sell at the sell price. Rough estimate from past "
+                        + "sales, so real sell times can be quite different. Deals without an estimate are never hidden.",
+                () -> cfg.maxSellTimeS = SkyAhNum.nextStep(cfg.maxSellTimeS, SELL_WITHIN),
+                () -> cfg.maxSellTimeS = SkyAhNum.prevStep(cfg.maxSellTimeS, SELL_WITHIN));
+        button(right(), y, half(), itemListsLabel(cfg), "Optional: show only some items, or never show others.",
+                b -> open(new SkyAhItemListsScreen(this)));
+        y += GAP + 2;
+        y += para(X, y, W, Component.literal("Profit counts the real sell price: recent sales, or just under the cheapest "
+                + "listing if someone sells cheaper. AH fees included.").withStyle(ChatFormatting.GRAY)) + 4;
         button(X, y, W, "Done", null, b -> onClose());
     }
 
@@ -165,7 +87,9 @@ public class SkyAhFiltersScreen extends SkyAhScreen {
             }
         });
         box.setTooltip(Tooltip.create(Component.literal(tip)));
-        button(X + W - stepW, y, stepW, "»", "Next step", b -> box.setValue(SkyAhNum.editCoins(SkyAhNum.nextStep(get.getAsLong(), steps))));
+        step(X + W - stepW, y, stepW, () -> Component.literal("»"), "Next step.",
+                () -> box.setValue(SkyAhNum.editCoins(SkyAhNum.nextStep(get.getAsLong(), steps))),
+                () -> box.setValue(SkyAhNum.editCoins(SkyAhNum.prevStep(get.getAsLong(), steps))));
     }
 
     private void pctRow(int y) {
@@ -186,10 +110,58 @@ public class SkyAhFiltersScreen extends SkyAhScreen {
         });
         box.setTooltip(Tooltip.create(Component.literal(
                 "Profit as a percent of the buy price. Deals must reach min profit AND min percent.")));
-        button(X + W - stepW, y, stepW, "»", "Next step", b -> {
-            long next = SkyAhNum.nextStep((long) Math.floor(cfg.minPct), PCT_STEPS);
-            box.setValue(next > 0 ? Long.toString(next) : "");
-        });
+        step(X + W - stepW, y, stepW, () -> Component.literal("»"), "Next step.",
+                () -> {
+                    long next = SkyAhNum.nextStep((long) Math.floor(cfg.minPct), PCT_STEPS);
+                    box.setValue(next > 0 ? Long.toString(next) : "");
+                },
+                () -> {
+                    long prev = SkyAhNum.prevStep((long) Math.ceil(cfg.minPct), PCT_STEPS);
+                    box.setValue(prev > 0 ? Long.toString(prev) : "");
+                });
+    }
+
+    /** Index in PRICE_STEPS, or -1 for a value set elsewhere (old config, command). */
+    private static int priceIndex(SkyAhConfig cfg) {
+        if (cfg.maxPriceFromPurse) {
+            return cfg.maxPrice <= 0 ? 1 : -1;
+        }
+        for (int i = 0; i < PRICE_STEPS.length; i++) {
+            if (PRICE_STEPS[i] >= 0 && PRICE_STEPS[i] == cfg.maxPrice) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void setPriceStep(SkyAhConfig cfg, int i) {
+        long v = PRICE_STEPS[(i % PRICE_STEPS.length + PRICE_STEPS.length) % PRICE_STEPS.length];
+        cfg.maxPriceFromPurse = v < 0;
+        cfg.maxPrice = Math.max(0L, v);
+    }
+
+    static String maxPriceLabel(SkyAhConfig cfg) {
+        if (cfg.maxPriceFromPurse) {
+            long purse = SkyAhPurse.get();
+            String p = purse >= 0 ? "my purse (" + FlipChat.fmt(purse) + ")" : "my purse (not seen)";
+            return cfg.maxPrice > 0 ? FlipChat.fmt(cfg.maxPrice) + " or purse" : p;
+        }
+        return cfg.maxPrice > 0 ? FlipChat.fmt(cfg.maxPrice) : "no limit";
+    }
+
+    private static int typeIndex(SkyAhConfig cfg) {
+        for (int i = 0; i < DEAL_TYPES.length; i++) {
+            if (DEAL_TYPES[i][0] == cfg.showBin && DEAL_TYPES[i][1] == cfg.showAuctions) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private static void setDealType(SkyAhConfig cfg, int i) {
+        boolean[] t = DEAL_TYPES[i % DEAL_TYPES.length];
+        cfg.showBin = t[0];
+        cfg.showAuctions = t[1];
     }
 
     private static String dealType(SkyAhConfig cfg) {
@@ -202,35 +174,33 @@ public class SkyAhFiltersScreen extends SkyAhScreen {
         return cfg.showAuctions ? "auctions only" : "none";
     }
 
-    private static String profitMode(SkyAhConfig cfg) {
-        return cfg.useRealProfit ? "safe (floor)" : "at target";
-    }
-
-    static String floorLabel(String mode) {
-        switch (mode == null ? "all" : mode) {
-            case "above": return "not below target";
-            case "below": return "below target";
-            case "has": return "must exist";
-            default: return "any";
+    /** "~6h": a rough estimate, hence the tilde. */
+    static String sellWithinLabel(long seconds) {
+        if (seconds <= 0) {
+            return "any";
         }
+        return "~" + (seconds >= 86_400 ? "1 day" : FlipChat.duration(seconds));
     }
 
-    /** Short form for the main screen summary; null when no floor filter. */
-    static String floorShort(String mode) {
-        switch (mode == null ? "all" : mode) {
-            case "above": return "floor not below target";
-            case "below": return "floor below target";
-            case "has": return "has floor";
-            default: return null;
-        }
-    }
-
-    private static String next(String mode) {
-        for (int i = 0; i < FLOOR_MODES.length; i++) {
-            if (FLOOR_MODES[i].equals(mode)) {
-                return FLOOR_MODES[(i + 1) % FLOOR_MODES.length];
+    private static int count(String list) {
+        int n = 0;
+        if (list != null) {
+            for (String t : list.split(",")) {
+                if (!t.isBlank()) {
+                    n++;
+                }
             }
         }
-        return FLOOR_MODES[0];
+        return n;
+    }
+
+    private static Component itemListsLabel(SkyAhConfig cfg) {
+        int only = count(cfg.whitelist);
+        int never = count(cfg.blacklist);
+        if (only == 0 && never == 0) {
+            return Component.literal("Item lists: ").append(Component.literal("none").withStyle(ChatFormatting.GRAY));
+        }
+        String v = only > 0 && never > 0 ? "only " + only + ", never " + never : only > 0 ? "only " + only : "never " + never;
+        return valued("Item lists", v);
     }
 }

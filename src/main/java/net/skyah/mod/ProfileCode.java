@@ -55,6 +55,7 @@ public final class ProfileCode {
         p.minPct = Math.max(0.0, Math.min(10_000.0, p.minPct));
         p.maxPrice = Math.max(0L, p.maxPrice);
         p.minSalesPerDay = Math.max(0.0, Math.min(100_000.0, p.minSalesPerDay));
+        p.maxSellTimeS = Math.max(0L, Math.min(7 * 86_400L, p.maxSellTimeS));
         p.whitelist = clip(p.whitelist);
         p.blacklist = clip(p.blacklist);
         if (p.floorFilter == null

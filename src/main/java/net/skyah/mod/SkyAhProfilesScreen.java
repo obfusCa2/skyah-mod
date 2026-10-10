@@ -1,7 +1,6 @@
 package net.skyah.mod;
 
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -9,14 +8,15 @@ import net.minecraft.network.chat.MutableComponent;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Named filter profiles: activate, save current, delete, export/import codes.
- *  A profile holds filters + color rules only, never key or url. */
+/** Profiles: the built-in ones every player has, then your own (activate,
+ *  save current, delete, export/import codes). One list with pages, so many
+ *  profiles never push the buttons off the screen. */
 public class SkyAhProfilesScreen extends SkyAhScreen {
     private static final int MAX_PROFILES = 10;
 
-    private EditBox nameBox;
     private String typedName = "";
     private String status = "";
+    private int page = 0;
 
     public SkyAhProfilesScreen(Screen parent) {
         super("Profiles", parent);
@@ -29,51 +29,85 @@ public class SkyAhProfilesScreen extends SkyAhScreen {
             cfg.profiles = new ArrayList<>();
         }
         int y = 24;
-        y += para(X, y, W, Component.literal("A profile stores filters and profit colors. Click one to use it. "
-                + "Export copies a code you can paste in Discord; Import reads it from the clipboard.")
-                .withStyle(ChatFormatting.GRAY)) + 6;
+        y += para(X, y, W, Component.literal("Click a profile to use it. Export copies a code to share, "
+                + "Import reads one from the clipboard.").withStyle(ChatFormatting.GRAY)) + 6;
 
         int sideW = 64;
         int delW = 20;
         int listW = W - sideW - delW - 12;
-        if (cfg.profiles.isEmpty()) {
-            text(X, y + (H - 8) / 2, () -> Component.literal("No profiles yet. Type a name below and save your current filters.")
-                    .withStyle(ChatFormatting.DARK_GRAY));
+        List<Object> items = new ArrayList<>(SkyAhPresets.ALL);
+        items.addAll(cfg.profiles);
+        // Rows that fit above the name box, the import row and the status line.
+        int fit = Math.max(1, (this.height - 8 - 12 - 2 * GAP - y) / GAP);
+        int pages = 1;
+        List<Object> shown = items;
+        if (items.size() > fit) {
+            int per = Math.max(1, fit - 1);
+            pages = (items.size() + per - 1) / per;
+            page = Math.min(page, pages - 1);
+            shown = items.subList(page * per, Math.min(items.size(), page * per + per));
+        }
+        for (Object it : shown) {
+            if (it instanceof SkyAhPresets.Preset p) {
+                button(X, y, W, presetLabel(p, cfg), p.tip(), b -> {
+                    SkyAhPresets.apply(p, cfg);
+                    changed();
+                    SkyAhMod.sendSettings();
+                    status = "Using " + p.name();
+                    this.rebuildWidgets();
+                });
+            } else if (it instanceof SkyAhProfile p) {
+                button(X, y, listW, profileLabel(p, cfg), "Use this profile", b -> {
+                    p.applyTo(cfg);
+                    changed();
+                    SkyAhMod.sendSettings();
+                    status = "Using " + p.name;
+                    this.rebuildWidgets();
+                });
+                button(X + listW + 6, y, sideW, "Export", "Copy a share code to the clipboard", b -> {
+                    String code = ProfileCode.encode(p);
+                    this.minecraft.keyboardHandler.setClipboard(code);
+                    SkyAhLog.add("profile code copied: " + p.name + " (" + code.length() + " chars)");
+                    status = "Code for " + p.name + " copied";
+                    this.rebuildWidgets();
+                });
+                button(X + W - delW, y, delW, Component.literal("X").withStyle(ChatFormatting.RED), "Delete " + p.name, b -> {
+                    cfg.profiles.remove(p);
+                    if (p.name != null && p.name.equals(cfg.activeProfile)) {
+                        cfg.activeProfile = "";
+                    }
+                    changed();
+                    status = "Deleted " + p.name;
+                    this.rebuildWidgets();
+                });
+            }
             y += GAP;
         }
-        for (int i = 0; i < cfg.profiles.size(); i++) {
-            SkyAhProfile p = cfg.profiles.get(i);
-            button(X, y, listW, profileLabel(p, cfg), "Use this profile", b -> {
-                p.applyTo(cfg);
-                changed();
-                SkyAhMod.sendSettings();
-                status = "Using " + p.name;
+        if (pages > 1) {
+            int total = pages;
+            button(X, y, 40, "<", null, b -> {
+                page = (page + total - 1) % total;
                 this.rebuildWidgets();
             });
-            button(X + listW + 6, y, sideW, "Export", "Copy a share code to the clipboard", b -> {
-                String code = ProfileCode.encode(p);
-                this.minecraft.keyboardHandler.setClipboard(code);
-                SkyAhLog.add("profile code copied: " + p.name + " (" + code.length() + " chars)");
-                status = "Code for " + p.name + " copied";
-                this.rebuildWidgets();
-            });
-            button(X + W - delW, y, delW, Component.literal("X").withStyle(ChatFormatting.RED), "Delete " + p.name, b -> {
-                cfg.profiles.remove(p);
-                if (p.name != null && p.name.equals(cfg.activeProfile)) {
-                    cfg.activeProfile = "";
-                }
-                changed();
-                status = "Deleted " + p.name;
+            int pageNo = page + 1;
+            text(X + 46, y + (H - 8) / 2, () -> Component.literal("Page " + pageNo + " / " + total).withStyle(ChatFormatting.GRAY));
+            button(X + W - 40, y, 40, ">", null, b -> {
+                page = (page + 1) % total;
                 this.rebuildWidgets();
             });
             y += GAP;
         }
 
-        nameBox = box(X, y, listW, typedName, "new profile name", 24, s -> typedName = s);
+        box(X, y, listW, typedName, "name for your own profile", 24, s -> typedName = s);
         button(X + listW + 6, y, W - listW - 6, "Save current", "Save your current filters and colors under this name", b -> {
             String name = typedName.trim();
             if (name.isEmpty()) {
                 status = "Type a name first";
+                this.rebuildWidgets();
+                return;
+            }
+            if (SkyAhPresets.isPresetName(name)) {
+                status = "That name is taken by a built-in profile";
                 this.rebuildWidgets();
                 return;
             }
@@ -117,6 +151,14 @@ public class SkyAhProfilesScreen extends SkyAhScreen {
         button(right(), y, half(), "Back", null, b -> onClose());
         y += GAP + 2;
         text(X, y, () -> status.isEmpty() ? null : Component.literal(status).withStyle(ChatFormatting.YELLOW));
+    }
+
+    private static Component presetLabel(SkyAhPresets.Preset p, SkyAhConfig cfg) {
+        Component desc = Component.literal(" · " + p.desc()).withStyle(ChatFormatting.GRAY);
+        if (SkyAhPresets.matches(p, cfg)) {
+            return Component.literal("▶ " + p.name()).withStyle(ChatFormatting.GREEN).append(desc);
+        }
+        return Component.literal(p.name()).append(desc);
     }
 
     /** "▶ name" while the settings equal the profile, "name (changed)" after edits. */

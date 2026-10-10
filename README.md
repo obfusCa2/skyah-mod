@@ -4,8 +4,8 @@ Fabric mod for Hypixel SkyBlock. Shows the auction deals [SkyAH](https://skyah.n
 
 ## Download
 
-- Minecraft 26.3: [skyah-mod-0.2.1-mc26.3.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.2.1/skyah-mod-0.2.1-mc26.3.jar)
-- Minecraft 26.2: [skyah-mod-0.2.1-mc26.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.2.1/skyah-mod-0.2.1-mc26.2.jar)
+- Minecraft 26.3: [skyah-mod-0.3.0-mc26.3.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.0/skyah-mod-0.3.0-mc26.3.jar)
+- Minecraft 26.2: [skyah-mod-0.3.0-mc26.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.0/skyah-mod-0.3.0-mc26.2.jar)
 
 Same files as on [skyah.net/api](https://skyah.net/api). SHA-256 checksums are on the [release page](https://github.com/obfusCa2/skyah-mod/releases).
 
@@ -14,7 +14,7 @@ Same files as on [skyah.net/api](https://skyah.net/api). SHA-256 checksums are o
 1. Get a free key on [skyah.net/api](https://skyah.net/api). You need a linked Minecraft account.
 2. Put the jar for your Minecraft version in your `mods` folder. Updating? Delete the old SkyAH jar first.
    You also need Fabric Loader 0.19.5+, Fabric API and Java 25.
-3. Start the game, press `K`, open **Account & key** and paste the key.
+3. Copy your key, start the game, press `K`, open **Account & key** and click **Paste key**.
 
 Commands: `/skyah test` shows two example deals, `/skyah status`, `/skyah logs`, `/skyah reconnect`.
 

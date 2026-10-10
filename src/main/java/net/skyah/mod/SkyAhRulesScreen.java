@@ -62,11 +62,8 @@ public class SkyAhRulesScreen extends SkyAhScreen {
                     changed();
                 }
             });
-            button(X + coinW + pctW + 12, y, colorW, colorLabel(r.color), "Click for the next color", b -> {
-                r.color = nextColor(r.color);
-                changed();
-                b.setMessage(colorLabel(r.color));
-            });
+            step(X + coinW + pctW + 12, y, colorW, () -> colorLabel(r.color), "Click for the next color.",
+                    () -> r.color = nextColor(r.color, 1), () -> r.color = nextColor(r.color, -1));
             button(X + W - delW, y, delW, Component.literal("X").withStyle(ChatFormatting.RED), "Delete this rule", b -> {
                 if (rules.size() > 1) {
                     rules.remove(r);
@@ -93,10 +90,10 @@ public class SkyAhRulesScreen extends SkyAhScreen {
         return f == null ? Component.literal(name) : Component.literal(name).withStyle(f);
     }
 
-    private static String nextColor(String c) {
+    private static String nextColor(String c, int delta) {
         for (int i = 0; i < COLORS.length; i++) {
             if (COLORS[i].equalsIgnoreCase(c)) {
-                return COLORS[(i + 1) % COLORS.length];
+                return COLORS[Math.floorMod(i + delta, COLORS.length)];
             }
         }
         return COLORS[0];

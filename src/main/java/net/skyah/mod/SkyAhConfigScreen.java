@@ -11,8 +11,10 @@ import net.minecraft.network.chat.MutableComponent;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Main screen (K): status, what the filters keep, and the four areas. */
+/** Main screen (K): status, the filters in one line, and what players change
+ *  most. The key is activated on the website only; this links there. */
 public class SkyAhConfigScreen extends SkyAhScreen {
+    private static final long[] ALERT_STEPS = {-1L, 0L, 5_000_000L, 10_000_000L, 25_000_000L, 50_000_000L, 100_000_000L};
     private boolean confirmReset = false;
     /** True after clicking the hotkey button: the next key or mouse button is the hotkey. */
     private boolean capturing = false;
@@ -34,6 +36,11 @@ public class SkyAhConfigScreen extends SkyAhScreen {
         text(X, y, () -> coverageLine(cfg));
         y += 18;
 
+        if (SkyAhKey.needsActivation()) {
+            button(X, y, W, Component.literal(SkyAhKey.isInactive() ? "Activate key on skyah.net/api" : "Renew key on skyah.net/api")
+                    .withStyle(ChatFormatting.YELLOW), SkyAhKey.ACTIVATE_TIP, b -> SkyAhKey.openWebsite(this));
+            y += GAP;
+        }
         toggle(X, y, half(), "Deals in chat",
                 "Turns the SkyAH deal feed on or off. Off also closes the connection.",
                 () -> cfg.enabled, v -> {
@@ -45,34 +52,29 @@ public class SkyAhConfigScreen extends SkyAhScreen {
                     }
                 });
         button(right(), y, half(), "Filters...",
-                "Which deals show up: profit, percent, price, floor, item lists.",
+                "Which deals show up: profit, percent, price, sell time, item lists.",
                 b -> open(new SkyAhFiltersScreen(this)));
         y += GAP;
         button(X, y, half(), "Chat line...",
                 "What a deal line shows, with a live example. Colors, sound and click.",
                 b -> open(new SkyAhChatScreen(this)));
         button(right(), y, half(), "Profiles...",
-                "Save, switch and share filter sets.",
+                "Ready-made and your own filter sets: switch and share.",
                 b -> open(new SkyAhProfilesScreen(this)));
         y += GAP;
         Component account = cfg.hasKey()
                 ? Component.literal("Account & key...")
                 : Component.literal("Account & key (!)").withStyle(ChatFormatting.YELLOW);
-        button(X, y, half(), account, "API key, connection, logs.",
+        button(X, y, half(), account, "Your key and the website.",
                 b -> open(new SkyAhAccountScreen(this)));
-        button(right(), y, half(), "Recommended setup",
-                "Resets filters, chat line, colors and sound to the recommended setup "
-                        + "(1M+ profit, 5%+, sound from 10M). Item lists, profiles and your key stay.",
+        button(right(), y, half(), "Show example deals",
+                "Closes this menu and puts two example deals in chat, like /skyah test.",
                 b -> {
-                    if (!confirmReset) {
-                        confirmReset = true;
-                        b.setMessage(Component.literal("Click again to reset").withStyle(ChatFormatting.YELLOW));
-                        return;
+                    onClose();
+                    for (Flip f : FlipChat.samples()) {
+                        f.auctionId = "test";
+                        FlipChat.display(f, cfg);
                     }
-                    confirmReset = false;
-                    cfg.applyRecommended();
-                    changed();
-                    b.setMessage(Component.literal("Recommended setup applied").withStyle(ChatFormatting.GREEN));
                 });
         y += GAP;
         button(X, y, W, hotkeyLabel(),
@@ -84,12 +86,53 @@ public class SkyAhConfigScreen extends SkyAhScreen {
                     capturing = true;
                     b.setMessage(hotkeyLabel());
                 });
+        y += GAP;
+        // Right under the hotkey: the alert shows the deal, the hotkey opens it.
+        step(X, y, W, () -> valued("Screen alert", alertLabel(cfg)),
+                "Big text in the middle of the screen when a deal arrives, e.g. DEAL +24.5M, "
+                        + "with the item and your deal hotkey below. Pick a profit so it only fires "
+                        + "for the big ones, then press the hotkey to open it. Several deals at once: "
+                        + "it shows the best one with +N more. Use at your own risk.",
+                () -> setAlert(cfg, SkyAhNum.nextStep(alertValue(cfg), ALERT_STEPS)),
+                () -> setAlert(cfg, SkyAhNum.prevStep(alertValue(cfg), ALERT_STEPS)));
         y += H + 3;
         text(X, y, this::hotkeyHint);
         y += 12;
         text(X, y, () -> Component.literal("Use at your own risk").withStyle(ChatFormatting.GOLD));
         y += 14;
-        button(X, y, W, "Done", null, b -> onClose());
+        button(X, y, half(), "Reset to recommended",
+                "Sets filters, chat line, colors and sound back to the recommended setup "
+                        + "(1M+ profit, 5%+, sound from 10M). Item lists, profiles and your key stay. Click twice.",
+                b -> {
+                    if (!confirmReset) {
+                        confirmReset = true;
+                        b.setMessage(Component.literal("Click again to reset").withStyle(ChatFormatting.YELLOW));
+                        return;
+                    }
+                    confirmReset = false;
+                    cfg.applyRecommended();
+                    changed();
+                    b.setMessage(Component.literal("Recommended setup applied").withStyle(ChatFormatting.GREEN));
+                });
+        button(right(), y, half(), "Done", null, b -> onClose());
+    }
+
+    private static long alertValue(SkyAhConfig cfg) {
+        return cfg.screenAlert ? Math.max(0L, cfg.screenAlertMinProfit) : -1L;
+    }
+
+    private static void setAlert(SkyAhConfig cfg, long v) {
+        cfg.screenAlert = v >= 0;
+        if (v >= 0) {
+            cfg.screenAlertMinProfit = v;
+        }
+    }
+
+    private static String alertLabel(SkyAhConfig cfg) {
+        if (!cfg.screenAlert) {
+            return "off";
+        }
+        return cfg.screenAlertMinProfit <= 0 ? "every deal" : "from " + FlipChat.fmt(cfg.screenAlertMinProfit);
     }
 
     private Component hotkeyLabel() {
@@ -108,7 +151,7 @@ public class SkyAhConfigScreen extends SkyAhScreen {
         if (capturing) {
             return Component.literal("Left click cancels, ESC removes the hotkey.").withStyle(ChatFormatting.GRAY);
         }
-        java.util.List<Component> other = SkyAhHotkey.conflicts(this.minecraft, SkyAhMod.OPEN_KEY);
+        List<Component> other = SkyAhHotkey.conflicts(this.minecraft, SkyAhMod.OPEN_KEY);
         if (!other.isEmpty()) {
             MutableComponent out = Component.literal("Also used by: ").withStyle(ChatFormatting.RED);
             for (int i = 0; i < other.size(); i++) {
@@ -153,19 +196,23 @@ public class SkyAhConfigScreen extends SkyAhScreen {
         return super.mouseClicked(e, doubleClick);
     }
 
-    /** "1M+ profit · 5%+ · any price · BIN only · whitelist". */
+    /** "Filters (Balanced): 1M+ profit · 5%+ · any price". */
     static Component filterSummary(SkyAhConfig cfg) {
         List<String> parts = new ArrayList<>();
         parts.add(cfg.minProfit > 0 ? FlipChat.fmt(cfg.minProfit) + "+ profit" : "any profit");
         if (cfg.minPct > 0) {
             parts.add(trimPct(cfg.minPct) + "%+");
         }
-        parts.add(cfg.maxPrice > 0 ? "up to " + FlipChat.fmt(cfg.maxPrice) : "any price");
-        if (cfg.maxPriceFromPurse) {
+        if (cfg.maxPriceFromPurse && cfg.maxPrice <= 0) {
             parts.add("within purse");
+        } else {
+            parts.add(cfg.maxPrice > 0 ? "up to " + FlipChat.fmt(cfg.maxPrice) : "any price");
+            if (cfg.maxPriceFromPurse) {
+                parts.add("within purse");
+            }
         }
-        if (cfg.minSalesPerDay > 0) {
-            parts.add(FlipChat.rate(cfg.minSalesPerDay) + "+ sales/day");
+        if (cfg.maxSellTimeS > 0) {
+            parts.add("sells within " + SkyAhFiltersScreen.sellWithinLabel(cfg.maxSellTimeS));
         }
         if (cfg.showBin && !cfg.showAuctions) {
             parts.add("BIN only");
@@ -174,17 +221,14 @@ public class SkyAhConfigScreen extends SkyAhScreen {
         } else if (!cfg.showBin) {
             parts.add("no deal type");
         }
-        String floor = SkyAhFiltersScreen.floorShort(cfg.floorFilter);
-        if (floor != null) {
-            parts.add(floor);
-        }
         if (cfg.whitelist != null && !cfg.whitelist.isBlank()) {
             parts.add("whitelist");
         }
         if (cfg.blacklist != null && !cfg.blacklist.isBlank()) {
             parts.add("blacklist");
         }
-        return Component.literal("Filters: ").withStyle(ChatFormatting.GRAY)
+        String profile = SkyAhPresets.activeName(cfg);
+        return Component.literal(profile == null ? "Filters: " : "Filters (" + profile + "): ").withStyle(ChatFormatting.GRAY)
                 .append(Component.literal(String.join(" · ", parts)).withStyle(ChatFormatting.WHITE));
     }
 }

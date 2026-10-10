@@ -32,7 +32,7 @@ public class SkyAhChatScreen extends SkyAhScreen {
                 () -> cfg.showTarget, v -> cfg.showTarget = v);
         y += GAP;
         toggle(X, y, half(), "Percent", "Profit as a percent of the buy price.", () -> cfg.showPct, v -> cfg.showPct = v);
-        toggle(right(), y, half(), "Floor",
+        toggle(right(), y, half(), "Floor (cheapest BIN)",
                 "Cheapest comparable BIN listed right now. Red when it undercuts your sell target.",
                 () -> cfg.showFloor, v -> cfg.showFloor = v);
         y += GAP;
@@ -40,43 +40,21 @@ public class SkyAhChatScreen extends SkyAhScreen {
                 "How often this build sold per day (last 3 days), e.g. 14/d. Yellow under 1 a day.",
                 () -> cfg.showVolume, v -> cfg.showVolume = v);
         toggle(right(), y, half(), "Sell time",
-                "Realistic time until it sells at the target, e.g. ~2h. Same number as on the website.",
+                "Rough time until it sells at the target, e.g. ~2h. Same number as on the website.",
                 () -> cfg.showSellTime, v -> cfg.showSellTime = v);
         y += GAP;
         toggle(X, y, half(), "AH fees", "Listing fee and claim tax. Already taken off the profit.",
                 () -> cfg.showFee, v -> cfg.showFee = v);
-        button(right(), y, half(), "Profit colors...",
-                "Which color the profit gets, e.g. gold from 10M.",
-                b -> open(new SkyAhRulesScreen(this)));
+        toggle(right(), y, half(), "Old deals on join",
+                "When you connect, also show deals from the last 15 minutes that pass your filters. "
+                        + "Many of them are already sold.",
+                () -> cfg.showReplay, v -> cfg.showReplay = v);
         y += GAP;
-        button(X, y, half(), valued("Sound", soundLabel(cfg)),
+        step(X, y, half(), () -> valued("Sound", soundLabel(cfg)),
                 "Ping when a deal shows. 'from 10M' keeps it for the big ones.",
-                b -> {
-                    long next = nextSound(cfg);
-                    cfg.sound = next >= 0;
-                    if (next >= 0) {
-                        cfg.soundMinProfit = next;
-                        SkyAhSound.play(cfg.soundName);
-                    }
-                    changed();
-                    b.setMessage(valued("Sound", soundLabel(cfg)));
-                });
-        button(right(), y, half(), valued("Screen alert", alertLabel(cfg)),
-                "Big text in the middle of the screen when a deal arrives, e.g. DEAL +24.5M, "
-                        + "with the item and your deal hotkey below. Pick a profit so it only fires "
-                        + "for the big ones, then press the hotkey to open it. Several deals at once: "
-                        + "it shows the best one with +N more. Try it with /skyah test. Use at your own risk.",
-                b -> {
-                    long next = SkyAhNum.nextStep(cfg.screenAlert ? Math.max(0L, cfg.screenAlertMinProfit) : -1L, ALERT_STEPS);
-                    cfg.screenAlert = next >= 0;
-                    if (next >= 0) {
-                        cfg.screenAlertMinProfit = next;
-                    }
-                    changed();
-                    b.setMessage(valued("Screen alert", alertLabel(cfg)));
-                });
-        y += GAP;
-        button(X, y, half(), valued("Click", clickLabel(cfg)),
+                () -> setSound(cfg, SkyAhNum.nextStep(soundValue(cfg), SOUND_STEPS)),
+                () -> setSound(cfg, SkyAhNum.prevStep(soundValue(cfg), SOUND_STEPS)));
+        button(right(), y, half(), valued("Click", clickLabel(cfg)),
                 "Open auction: runs /viewauction and shows the SkyAH panel next to it. "
                         + "Copy: puts the command on your clipboard.",
                 b -> {
@@ -84,22 +62,34 @@ public class SkyAhChatScreen extends SkyAhScreen {
                     changed();
                     b.setMessage(valued("Click", clickLabel(cfg)));
                 });
-        toggle(right(), y, half(), "Missed deals",
-                "When you connect, also show deals from the last 15 minutes that pass your filters. "
-                        + "Many of them are already sold.",
-                () -> cfg.showReplay, v -> cfg.showReplay = v);
+        y += GAP;
+        step(X, y, half(), () -> valued("Sound type", SkyAhSound.label(cfg.soundName)),
+                "Which sound plays. Each click plays the new one.",
+                () -> {
+                    cfg.soundName = SkyAhSound.next(cfg.soundName, 1);
+                    SkyAhSound.play(cfg.soundName);
+                },
+                () -> {
+                    cfg.soundName = SkyAhSound.next(cfg.soundName, -1);
+                    SkyAhSound.play(cfg.soundName);
+                });
+        button(right(), y, half(), "Profit colors...",
+                "Which color the profit gets, e.g. gold from 10M.",
+                b -> open(new SkyAhRulesScreen(this)));
         y += GAP;
         button(X, y, W, "Done", null, b -> onClose());
     }
 
-    private static final long[] ALERT_STEPS = {-1L, 0L, 5_000_000L, 10_000_000L, 25_000_000L,
-            50_000_000L, 100_000_000L};
+    private static long soundValue(SkyAhConfig cfg) {
+        return cfg.sound ? Math.max(0L, cfg.soundMinProfit) : -1L;
+    }
 
-    private static String alertLabel(SkyAhConfig cfg) {
-        if (!cfg.screenAlert) {
-            return "off";
+    private static void setSound(SkyAhConfig cfg, long v) {
+        cfg.sound = v >= 0;
+        if (v >= 0) {
+            cfg.soundMinProfit = v;
+            SkyAhSound.play(cfg.soundName);
         }
-        return cfg.screenAlertMinProfit <= 0 ? "every deal" : "from " + FlipChat.fmt(cfg.screenAlertMinProfit);
     }
 
     private List<Component> previewLines(SkyAhConfig cfg) {
@@ -131,10 +121,6 @@ public class SkyAhChatScreen extends SkyAhScreen {
             return "off";
         }
         return cfg.soundMinProfit <= 0 ? "every deal" : "from " + FlipChat.fmt(cfg.soundMinProfit);
-    }
-
-    private static long nextSound(SkyAhConfig cfg) {
-        return SkyAhNum.nextStep(cfg.sound ? Math.max(0L, cfg.soundMinProfit) : -1L, SOUND_STEPS);
     }
 
     private static String clickLabel(SkyAhConfig cfg) {

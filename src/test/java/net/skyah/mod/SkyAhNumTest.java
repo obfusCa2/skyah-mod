@@ -41,6 +41,9 @@ class SkyAhNumTest {
         long[] steps = {0, 1_000_000L, 5_000_000L};
         assertEquals(5_000_000L, SkyAhNum.nextStep(3_000_000L, steps));
         assertEquals(0L, SkyAhNum.nextStep(5_000_000L, steps));
+        assertEquals(1_000_000L, SkyAhNum.prevStep(3_000_000L, steps));
+        assertEquals(5_000_000L, SkyAhNum.prevStep(0L, steps));
+        assertEquals(-1L, SkyAhNum.prevStep(0L, new long[]{-1L, 0L, 5L}));
     }
 
     @Test

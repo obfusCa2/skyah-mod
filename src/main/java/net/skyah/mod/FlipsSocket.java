@@ -18,6 +18,8 @@ public class FlipsSocket {
     private volatile boolean stopped = true;
     private final AtomicLong generation = new AtomicLong();
     private int attempts;
+    /** When the current socket opened; 0 while not open. */
+    private volatile long openedAt = 0L;
     public volatile int lastCloseCode = 0;
     public volatile String lastCloseReason = "";
     public volatile long lastMessageAt = 0L;
@@ -74,7 +76,7 @@ public class FlipsSocket {
         return c != null && c.isOpen();
     }
 
-    /** Best-effort client -> server message (settings, purchases, open timings). */
+    /** Best-effort client -> server message (settings, purchases, open timings, key state requests). */
     public boolean send(String json) {
         WebSocketClient c = client;
         if (c == null || !c.isOpen()) {
@@ -119,9 +121,9 @@ public class FlipsSocket {
                         }
                         return;
                     }
-                    attempts = 0;
+                    openedAt = System.currentTimeMillis();
                     SkyAhLog.add("connected [" + SkyAhMod.BUILD + "]: " + shown);
-                    SkyAhMod.sendSettings();
+                    SkyAhMod.sendSettings(true);
                     startPinger(gen, this);
                 }
 
@@ -140,6 +142,10 @@ public class FlipsSocket {
                 @Override
                 public void onMessage(String message) {
                     if (gen != generation.get()) {
+                        return;
+                    }
+                    if (SkyAhKey.isKeyMessage(message)) {
+                        SkyAhKey.update(message);
                         return;
                     }
                     long receivedAt = System.currentTimeMillis();
@@ -175,6 +181,12 @@ public class FlipsSocket {
                     }
                     lastCloseCode = code;
                     lastCloseReason = reason == null ? "" : reason;
+                    // The server accepts and then closes rejected keys, so
+                    // only a connection that lasted resets the backoff.
+                    if (openedAt > 0L && System.currentTimeMillis() - openedAt > 30_000L) {
+                        attempts = 0;
+                    }
+                    openedAt = 0L;
                     SkyAhLog.add("closed: " + code
                             + (reason == null || reason.isBlank() ? "" : " " + reason));
                     if (code == 4401) {
@@ -230,9 +242,16 @@ public class FlipsSocket {
         if (stopped) {
             return;
         }
-        int delaySec = lastCloseCode == 4409
-                ? 15
-                : Math.min(30, 1 << Math.min(attempts, 5));
+        int delaySec;
+        if (lastCloseCode == 4409) {
+            delaySec = 15;
+        } else if (lastCloseCode == 4401 || lastCloseCode == 4402) {
+            // No, wrong or inactive key: fast retries cannot fix that. Saving
+            // a key or Reconnect in the menu still connects right away.
+            delaySec = Math.min(lastCloseCode == 4401 ? 60 : 30, 5 << Math.min(attempts, 4));
+        } else {
+            delaySec = Math.min(30, 1 << Math.min(attempts, 5));
+        }
         attempts++;
         SkyAhLog.add("reconnecting in " + delaySec + "s (attempt " + attempts + ")");
         Thread t = new Thread(() -> {

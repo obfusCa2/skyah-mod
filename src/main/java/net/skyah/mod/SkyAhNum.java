@@ -75,6 +75,17 @@ public final class SkyAhNum {
         return java.math.BigDecimal.valueOf(v).stripTrailingZeros().toPlainString();
     }
 
+    /** Preset below the current value; wraps to the last one. */
+    public static long prevStep(long current, long[] steps) {
+        long best = Long.MIN_VALUE;
+        for (long s : steps) {
+            if (s < current && s > best) {
+                best = s;
+            }
+        }
+        return best == Long.MIN_VALUE ? steps[steps.length - 1] : best;
+    }
+
     /** Next preset above the current value; wraps to the first one. */
     public static long nextStep(long current, long[] steps) {
         for (long s : steps) {

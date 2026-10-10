@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** A named, shareable set of filter/color settings. Never contains key or url. */
+/** A named, shareable set of filter/color settings. Never contains key or url.
+ *  minSalesPerDay and floorFilter are only read from old codes; the filters no
+ *  longer use them. */
 public class SkyAhProfile {
     public String name = "";
     public long minProfit;
@@ -12,6 +14,9 @@ public class SkyAhProfile {
     public long maxPrice;
     public boolean maxPriceFromPurse;
     public double minSalesPerDay;
+    public long maxSellTimeS;
+    public boolean showBin = true;
+    public boolean showAuctions = true;
     public String whitelist = "";
     public String blacklist = "";
     public String floorFilter = "all";
@@ -27,10 +32,11 @@ public class SkyAhProfile {
         p.minPct = cfg.minPct;
         p.maxPrice = cfg.maxPrice;
         p.maxPriceFromPurse = cfg.maxPriceFromPurse;
-        p.minSalesPerDay = cfg.minSalesPerDay;
+        p.maxSellTimeS = cfg.maxSellTimeS;
+        p.showBin = cfg.showBin;
+        p.showAuctions = cfg.showAuctions;
         p.whitelist = cfg.whitelist == null ? "" : cfg.whitelist;
         p.blacklist = cfg.blacklist == null ? "" : cfg.blacklist;
-        p.floorFilter = cfg.floorFilter;
         p.colorRules = copyRules(cfg.colorRules);
         return p;
     }
@@ -40,10 +46,11 @@ public class SkyAhProfile {
         cfg.minPct = minPct;
         cfg.maxPrice = maxPrice;
         cfg.maxPriceFromPurse = maxPriceFromPurse;
-        cfg.minSalesPerDay = minSalesPerDay;
+        cfg.maxSellTimeS = maxSellTimeS;
+        cfg.showBin = showBin;
+        cfg.showAuctions = showAuctions;
         cfg.whitelist = whitelist == null ? "" : whitelist;
         cfg.blacklist = blacklist == null ? "" : blacklist;
-        cfg.floorFilter = floorFilter;
         cfg.colorRules = copyRules(colorRules);
         cfg.activeProfile = name;
     }
@@ -51,10 +58,10 @@ public class SkyAhProfile {
     /** True while the current settings still equal this profile. */
     public boolean matches(SkyAhConfig cfg) {
         if (minProfit != cfg.minProfit || minPct != cfg.minPct || maxPrice != cfg.maxPrice
-                || maxPriceFromPurse != cfg.maxPriceFromPurse || minSalesPerDay != cfg.minSalesPerDay
+                || maxPriceFromPurse != cfg.maxPriceFromPurse || maxSellTimeS != cfg.maxSellTimeS
+                || showBin != cfg.showBin || showAuctions != cfg.showAuctions
                 || !Objects.equals(nz(whitelist), nz(cfg.whitelist))
-                || !Objects.equals(nz(blacklist), nz(cfg.blacklist))
-                || !Objects.equals(floorFilter, cfg.floorFilter)) {
+                || !Objects.equals(nz(blacklist), nz(cfg.blacklist))) {
             return false;
         }
         List<ColorRule> a = colorRules == null ? List.of() : colorRules;
