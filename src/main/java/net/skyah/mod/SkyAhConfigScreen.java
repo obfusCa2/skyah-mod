@@ -3,6 +3,7 @@ package net.skyah.mod;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
@@ -115,6 +116,21 @@ public class SkyAhConfigScreen extends SkyAhScreen {
                     b.setMessage(Component.literal("Recommended setup applied").withStyle(ChatFormatting.GREEN));
                 });
         button(right(), y, half(), "Done", null, b -> onClose());
+    }
+
+    /** Version on the right of the title row; yellow with the newest one when outdated. */
+    @Override
+    protected void extra(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        Component v = versionText();
+        g.text(this.font, v, X + W - this.font.width(v), 8, WHITE);
+    }
+
+    static Component versionText() {
+        String latest = SkyAhMod.LATEST;
+        if (latest != null && SkyAhNum.isNewer(latest, SkyAhMod.VERSION)) {
+            return Component.literal("v" + SkyAhMod.VERSION + " · new: v" + latest).withStyle(ChatFormatting.YELLOW);
+        }
+        return Component.literal("v" + SkyAhMod.VERSION).withStyle(ChatFormatting.DARK_GRAY);
     }
 
     private static long alertValue(SkyAhConfig cfg) {

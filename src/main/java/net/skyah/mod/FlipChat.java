@@ -192,7 +192,7 @@ public class FlipChat {
     public static void display(Flip flip, SkyAhConfig cfg) {
         Minecraft mc = Minecraft.getInstance();
         if (mc != null && mc.gui != null) {
-            mc.gui.chatListener().handleSystemMessage(line(flip, cfg), false);
+            McCompat.systemMessage(mc, line(flip, cfg), false);
         }
         SkyAhStats.shown();
         // No sound or alert for catch-up deals (minutes old).

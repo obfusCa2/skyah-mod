@@ -148,6 +148,10 @@ public class FlipsSocket {
                         SkyAhKey.update(message);
                         return;
                     }
+                    if (message.contains("\"type\":\"version\"")) {
+                        SkyAhMod.versionMessage(message);
+                        return;
+                    }
                     long receivedAt = System.currentTimeMillis();
                     lastMessageAt = receivedAt;
                     Flip flip = Flip.parse(message);

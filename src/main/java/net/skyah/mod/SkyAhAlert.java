@@ -27,14 +27,14 @@ public final class SkyAhAlert {
 
     public static synchronized void show(Flip flip, SkyAhConfig cfg, long profit) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc == null || mc.gui == null || mc.gui.hud == null) {
+        if (mc == null || !McCompat.titlesReady(mc)) {
             return;
         }
         long now = System.currentTimeMillis();
         boolean up = current != null && !current.opened && now - shownAt < VISIBLE_MS;
         if (up && profit <= currentProfit) {
             more++;
-            mc.gui.hud.setSubtitle(subtitle(current));
+            McCompat.setSubtitle(mc, subtitle(current));
             return;
         }
         more = up ? more + 1 : 0;
@@ -44,9 +44,9 @@ public final class SkyAhAlert {
         ChatFormatting tier = FlipChat.ruleColor(cfg, profit, FlipChat.pctOf(flip, profit));
         Component title = Component.literal("DEAL ").withStyle(ChatFormatting.RED, ChatFormatting.BOLD)
                 .append(Component.literal(FlipChat.signed(profit)).withStyle(tier, ChatFormatting.BOLD));
-        mc.gui.hud.setTimes(FADE_IN, STAY, FADE_OUT);
-        mc.gui.hud.setSubtitle(subtitle(flip));
-        mc.gui.hud.setTitle(title);
+        McCompat.setTitleTimes(mc, FADE_IN, STAY, FADE_OUT);
+        McCompat.setSubtitle(mc, subtitle(flip));
+        McCompat.setTitle(mc, title);
     }
 
     /** The deal on screen right now, if it was not opened yet. */

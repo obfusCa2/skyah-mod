@@ -75,6 +75,28 @@ public final class SkyAhNum {
         return java.math.BigDecimal.valueOf(v).stripTrailingZeros().toPlainString();
     }
 
+    /** True when version `a` (e.g. "0.3.1") is newer than `b`; unparsable parts count as 0. */
+    public static boolean isNewer(String a, String b) {
+        String[] x = a == null ? new String[0] : a.trim().split("\\.");
+        String[] y = b == null ? new String[0] : b.trim().split("\\.");
+        for (int i = 0; i < Math.max(x.length, y.length); i++) {
+            int p = i < x.length ? intOr0(x[i]) : 0;
+            int q = i < y.length ? intOr0(y[i]) : 0;
+            if (p != q) {
+                return p > q;
+            }
+        }
+        return false;
+    }
+
+    private static int intOr0(String s) {
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     /** Preset below the current value; wraps to the last one. */
     public static long prevStep(long current, long[] steps) {
         long best = Long.MIN_VALUE;

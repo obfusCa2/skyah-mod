@@ -15,6 +15,10 @@ import java.util.regex.Pattern;
  *  second on the client tick: about 15 short lines, no network. */
 public final class SkyAhPurse {
     private static final Pattern PURSE = Pattern.compile("(?:Purse|Piggy):\\s*([\\d,]+(?:\\.\\d+)?)");
+    /** Hypixel splits long sidebar lines into team prefix, entry name and team
+     *  suffix, and the entry name can be an emoji, so the line reads
+     *  "Purse: 250,834(emoji),112". Everything outside printable ASCII goes. */
+    private static final Pattern NOT_ASCII = Pattern.compile("[^\\x20-\\x7E]");
     /** A value older than this is treated as unknown (left SkyBlock, sidebar off). */
     private static final long STALE_MS = 30_000L;
     private static volatile long purse = -1L;
@@ -71,7 +75,8 @@ public final class SkyAhPurse {
             return -1L;
         }
         String clean = ChatFormatting.stripFormatting(line);
-        Matcher m = PURSE.matcher(clean == null ? line : clean);
+        clean = NOT_ASCII.matcher(clean == null ? line : clean).replaceAll("");
+        Matcher m = PURSE.matcher(clean);
         if (!m.find()) {
             return -1L;
         }

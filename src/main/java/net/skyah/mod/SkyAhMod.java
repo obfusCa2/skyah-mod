@@ -31,15 +31,17 @@ import java.util.regex.Pattern;
 
 public class SkyAhMod implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("skyah");
-    public static final String VERSION = "0.3.0";
+    public static final String VERSION = "0.3.1";
     /** Build tag in the log, so a log shows which jar was running. */
-    public static final String BUILD = "gen21";
+    public static final String BUILD = "gen22";
     public static SkyAhConfig CONFIG;
     public static FlipsSocket SOCKET;
     /** Deal hotkey, unbound until the player picks a key (K menu or Controls). */
     public static KeyMapping OPEN_KEY;
     /** The menu key (K by default), named in chat hints. */
     public static KeyMapping MENU_KEY;
+    /** Newest released version as told by the server, or null. */
+    public static volatile String LATEST = null;
 
     private static final Gson GSON = new Gson();
     private static final Pattern PURCHASE_RE = Pattern.compile(
@@ -84,13 +86,11 @@ public class SkyAhMod implements ClientModInitializer {
             }
         });
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-            ScreenEvents.afterForeground(screen).register(
-                    (s, extractor, mouseX, mouseY, delta) -> SkyAhPanel.draw(s, extractor));
+            McCompat.afterScreenDraw(screen, SkyAhPanel::draw);
             SkyAhOpenTracker.screenInit(screen);
             if (screen instanceof AbstractContainerScreen<?>) {
                 // Open measurement for BIN deals: checked every frame while tracked.
-                ScreenEvents.afterForeground(screen).register(
-                        (s, extractor, mouseX, mouseY, delta) -> SkyAhOpenTracker.frame(s));
+                McCompat.afterScreenDraw(screen, (s, g) -> SkyAhOpenTracker.frame(s));
                 ScreenEvents.remove(screen).register(SkyAhOpenTracker::removed);
                 // Key mappings do not fire while a menu is open; the AH is one.
                 ScreenKeyboardEvents.allowKeyPress(screen).register((s, e) -> {
@@ -166,6 +166,18 @@ public class SkyAhMod implements ClientModInitializer {
         }
         boolean sent = SOCKET.send(GSON.toJson(evt));
         SkyAhLog.add((sent ? "purchase sent: " : "purchase (offline): ") + name + " " + FlipChat.fmt(price));
+    }
+
+    /** {"type":"version","latest":"0.3.1"} from the server: shown in the K menu. */
+    static void versionMessage(String json) {
+        try {
+            String v = com.google.gson.JsonParser.parseString(json).getAsJsonObject().get("latest").getAsString();
+            if (v.matches("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}")) {
+                LATEST = v;
+            }
+        } catch (Exception e) {
+            SkyAhLog.add("version message ignored: " + e.getClass().getSimpleName());
+        }
     }
 
     /** Settings for usage stats: all of them on connect (force), then only
@@ -247,7 +259,7 @@ public class SkyAhMod implements ClientModInitializer {
             java.util.List<String> lines = SkyAhLog.snapshot();
             mc.keyboardHandler.setClipboard(String.join(System.lineSeparator(), lines));
             if (mc.gui != null) {
-                mc.gui.chatListener().handleSystemMessage(Component.literal(
+                McCompat.systemMessage(mc, Component.literal(
                                 "SkyAH logs copied (" + lines.size() + " lines)")
                         .withStyle(net.minecraft.ChatFormatting.GOLD), false);
             }
@@ -266,11 +278,11 @@ public class SkyAhMod implements ClientModInitializer {
         if (mc == null || mc.gui == null) {
             return;
         }
-        mc.gui.chatListener().handleSystemMessage(Component.literal(
+        McCompat.systemMessage(mc, Component.literal(
                         "SkyAH logs (" + (lines.size() - from) + "/" + lines.size() + "):")
                 .withStyle(net.minecraft.ChatFormatting.GOLD), false);
         for (int i = from; i < lines.size(); i++) {
-            mc.gui.chatListener().handleSystemMessage(
+            McCompat.systemMessage(mc,
                     Component.literal(lines.get(i)).withStyle(net.minecraft.ChatFormatting.GRAY), false);
         }
     }

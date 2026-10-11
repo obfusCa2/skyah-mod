@@ -5,11 +5,23 @@ plugins {
 // MC version is part of the artifact name so parallel builds for different
 // Minecraft versions are distinguishable, e.g.:
 //   ./gradlew build -Pminecraft_version=26.2 -Pfabric_api_version=0.161.0+26.2
+//   ./gradlew build -Pminecraft_version=26.1.2 -Pfabric_api_version=0.155.3+26.1.2
 version = "${project.mod_version}+mc${project.minecraft_version}"
 group = project.maven_group
 
 base {
     archivesName = project.archives_base_name
+}
+
+// The few Minecraft API calls that differ between versions live in one small
+// class (McCompat) with a copy per version family: src/mc26_1 for 26.1.x,
+// src/mc26_2 for 26.2 and newer.
+sourceSets {
+    main {
+        java {
+            srcDir(project.minecraft_version.startsWith('26.1') ? 'src/mc26_1/java' : 'src/mc26_2/java')
+        }
+    }
 }
 
 repositories {

@@ -4,8 +4,9 @@ Fabric mod for Hypixel SkyBlock. Shows the auction deals [SkyAH](https://skyah.n
 
 ## Download
 
-- Minecraft 26.3: [skyah-mod-0.3.0-mc26.3.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.0/skyah-mod-0.3.0-mc26.3.jar)
-- Minecraft 26.2: [skyah-mod-0.3.0-mc26.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.0/skyah-mod-0.3.0-mc26.2.jar)
+- Minecraft 26.3: [skyah-mod-0.3.1-mc26.3.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.1/skyah-mod-0.3.1-mc26.3.jar)
+- Minecraft 26.2: [skyah-mod-0.3.1-mc26.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.1/skyah-mod-0.3.1-mc26.2.jar)
+- Minecraft 26.1.2: [skyah-mod-0.3.1-mc26.1.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.1/skyah-mod-0.3.1-mc26.1.2.jar)
 
 Same files as on [skyah.net/api](https://skyah.net/api). SHA-256 checksums are on the [release page](https://github.com/obfusCa2/skyah-mod/releases).
 
@@ -27,9 +28,10 @@ Needs JDK 25.
 ```
 ./gradlew build
 ./gradlew build -Pminecraft_version=26.2 -Pfabric_api_version=0.161.0+26.2
+./gradlew build -Pminecraft_version=26.1.2 -Pfabric_api_version=0.155.3+26.1.2
 ```
 
-The first line builds for Minecraft 26.3, the second for 26.2. The jar ends up in `build/libs/`.
+The first line builds for Minecraft 26.3, the others for 26.2 and 26.1.2. The jar ends up in `build/libs/`.
 
 Builds are reproducible. With Temurin 25.0.3 you get the same jar byte for byte, so its SHA-256 matches the checksum listed on skyah.net/api.
 

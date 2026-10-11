@@ -66,7 +66,7 @@ public final class SkyAhHotkey {
     /** Action bar line, so the hotkey never spams chat. */
     private static void feedback(Minecraft mc, String text) {
         if (mc != null && mc.gui != null) {
-            mc.gui.chatListener().handleSystemMessage(
+            McCompat.systemMessage(mc,
                     Component.literal("[SkyAH] " + text).withStyle(ChatFormatting.GRAY), true);
         }
     }

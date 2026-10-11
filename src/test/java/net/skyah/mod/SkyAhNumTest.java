@@ -47,6 +47,16 @@ class SkyAhNumTest {
     }
 
     @Test
+    void comparesVersions() {
+        org.junit.jupiter.api.Assertions.assertTrue(SkyAhNum.isNewer("0.3.1", "0.3.0"));
+        org.junit.jupiter.api.Assertions.assertTrue(SkyAhNum.isNewer("0.10.0", "0.9.9"));
+        org.junit.jupiter.api.Assertions.assertTrue(SkyAhNum.isNewer("1.0.0", "0.3.0"));
+        org.junit.jupiter.api.Assertions.assertFalse(SkyAhNum.isNewer("0.3.0", "0.3.0"));
+        org.junit.jupiter.api.Assertions.assertFalse(SkyAhNum.isNewer("0.2.9", "0.3.0"));
+        org.junit.jupiter.api.Assertions.assertFalse(SkyAhNum.isNewer(null, "0.3.0"));
+    }
+
+    @Test
     void chatNumbers() {
         assertEquals("3.23M", FlipChat.fmt(3_228_000L));
         assertEquals("22.4M", FlipChat.fmt(22_400_000L));
