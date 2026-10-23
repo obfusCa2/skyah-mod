@@ -32,7 +32,7 @@ public class SkyAhAccountScreen extends SkyAhScreen {
         boolean activate = SkyAhKey.needsActivation();
         if (activate) {
             button(X, y, W, Component.literal(SkyAhKey.isInactive() ? "Activate key on skyah.net/api" : "Renew key on skyah.net/api")
-                    .withStyle(ChatFormatting.YELLOW), SkyAhKey.ACTIVATE_TIP, b -> SkyAhKey.openWebsite(this));
+                    .withStyle(ChatFormatting.YELLOW), SkyAhKey.activateTip(), b -> SkyAhKey.openWebsite(this));
             y += GAP;
         }
         Component paste = cfg.hasKey()

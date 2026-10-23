@@ -52,6 +52,19 @@ public class FlipChat {
         return null;
     }
 
+    /** Shown deals younger than maxAgeMs, newest first (a copy). */
+    public static synchronized List<Flip> shownSince(long maxAgeMs) {
+        long now = System.currentTimeMillis();
+        List<Flip> out = new ArrayList<>();
+        for (Flip f : SHOWN) {
+            if (now - f.shownAt > maxAgeMs) {
+                break;
+            }
+            out.add(f);
+        }
+        return out;
+    }
+
     public static synchronized boolean anyShownSince(long maxAgeMs) {
         Flip f = SHOWN.peekFirst();
         return f != null && System.currentTimeMillis() - f.shownAt <= maxAgeMs;

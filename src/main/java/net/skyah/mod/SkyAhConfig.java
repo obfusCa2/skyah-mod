@@ -41,6 +41,12 @@ public class SkyAhConfig {
     public boolean screenAlert = false;
     /** Screen alert only from this profit (0 = every deal). */
     public long screenAlertMinProfit = 10_000_000L;
+    /** Hold mode for the deal hotkey (opt-in, see SkyAhHold). */
+    public boolean holdMode = false;
+    /** Hold the key this long before hold mode takes over (ms). */
+    public int holdAfterMs = 300;
+    /** Wait about this long on a sold deal before the next one opens (ms). */
+    public int holdDelayMs = 300;
     // run | copy
     public String clickAction = "run";
     public boolean showBin = true;

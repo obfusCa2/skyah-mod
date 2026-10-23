@@ -13,18 +13,24 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 
 import java.net.URI;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
+import java.util.Locale;
 
-/** Key state from the server ({"type":"key"}): when the 2-hour activation
- *  runs out. Activating and renewing happen on skyah.net/api only; the mod
- *  shows the time left, warns 10 minutes before and links to the website. */
+/** Key state from the server ({"type":"key"}): when the activation runs out.
+ *  Activating and renewing happen on skyah.net/api only; the mod shows the
+ *  time left, warns shortly before and links to the website. The window
+ *  length comes from the server (window_s), so nothing here assumes one. */
 public final class SkyAhKey {
     public static final String ACTIVATE_URL = "https://skyah.net/api#api-keys";
-    static final String ACTIVATE_TIP = "Activation runs on the website: one bid on the auction shown there unlocks deals "
-            + "for 2 hours. Same key, nothing to paste.";
     private static final long WARN_MS = 10 * 60_000L;
 
     /** Epoch ms when the key runs out: 0 = unknown, Long.MAX_VALUE = no limit. */
     private static volatile long activeUntil = 0L;
+    /** Length of one activation as sent by the server (window_s): 0 = unknown. */
+    private static volatile long windowMs = 0L;
     private static volatile boolean renewed = false;
     private static long warnedFor = 0L;
     private static long lastRequest = 0L;
@@ -45,18 +51,52 @@ public final class SkyAhKey {
         try {
             JsonObject o = JsonParser.parseString(json).getAsJsonObject();
             JsonElement until = o.get("active_until_ms");
+            JsonElement window = o.get("window_s");
             boolean permanent = o.has("permanent") && o.get("permanent").getAsBoolean();
             long next = permanent ? Long.MAX_VALUE : until != null && !until.isJsonNull() ? until.getAsLong() : 0L;
-            long prev = activeUntil;
-            long now = System.currentTimeMillis();
-            if (prev > 0 && prev != Long.MAX_VALUE && next != Long.MAX_VALUE
-                    && next - now > 60 * 60_000L && prev - now < 15 * 60_000L) {
+            if (window != null && !window.isJsonNull() && window.getAsLong() > 0) {
+                windowMs = window.getAsLong() * 1000L;
+            }
+            if (isRenewal(activeUntil, next)) {
                 renewed = true;
             }
             activeUntil = next;
         } catch (Exception e) {
             SkyAhLog.add("key message ignored: " + e.getClass().getSimpleName());
         }
+    }
+
+    /** The server moved the end of a timed key further out: the player renewed it. */
+    static boolean isRenewal(long prev, long next) {
+        return prev > 0 && prev != Long.MAX_VALUE && next != Long.MAX_VALUE && next - prev > 60_000L;
+    }
+
+    /** Warn (and show the Renew button) this long before the end: 10 minutes, less for short windows. */
+    static long warnMs(long window) {
+        return window > 0 ? Math.min(WARN_MS, window / 4) : WARN_MS;
+    }
+
+    /** "2 hours", "1 hour", "90 minutes", "1 minute". */
+    static String windowText(long ms) {
+        long m = Math.max(1L, ms / 60_000L);
+        if (m % 60 == 0) {
+            long h = m / 60;
+            return h + (h == 1 ? " hour" : " hours");
+        }
+        return m + (m == 1 ? " minute" : " minutes");
+    }
+
+    /** Tooltip of the Activate/Renew button, with the window length once the server sent it. */
+    static String activateTip() {
+        long window = windowMs;
+        return "Activation runs on the website: one bid on the auction shown there unlocks deals "
+                + (window > 0 ? "for " + windowText(window) : "for a limited time") + ". Same key, nothing to paste.";
+    }
+
+    /** Clock time a key runs out, in the player's own format ("21:45" or "9:45 PM"). */
+    static String untilText(long epochMs, ZoneId zone, Locale locale) {
+        return DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale)
+                .format(Instant.ofEpochMilli(epochMs).atZone(zone));
     }
 
     /** A new key was saved: the old timer no longer applies. */
@@ -91,10 +131,10 @@ public final class SkyAhKey {
 
     static boolean dueSoon() {
         long ms = remainingMs();
-        return activeUntil != 0L && ms != Long.MAX_VALUE && ms < WARN_MS;
+        return activeUntil != 0L && ms != Long.MAX_VALUE && ms < warnMs(windowMs);
     }
 
-    /** Show the Activate/Renew button: inactive, or running out in 10 minutes. */
+    /** Show the Activate/Renew button: inactive, or running out soon. */
     static boolean needsActivation() {
         SkyAhConfig cfg = SkyAhMod.CONFIG;
         FlipsSocket s = SkyAhMod.SOCKET;
@@ -159,13 +199,17 @@ public final class SkyAhKey {
         if (!s.isOpen()) {
             return;
         }
-        if (renewed) {
-            renewed = false;
-            mc.player.sendSystemMessage(tag().append(Component.literal("Key active for 2 hours.").withStyle(ChatFormatting.GREEN)));
-        }
         long left = remainingMs();
         long until = activeUntil;
-        if (until != 0L && until != Long.MAX_VALUE && left > 0 && left <= WARN_MS && warnedFor != until) {
+        if (renewed) {
+            renewed = false;
+            String text = until != 0L && until != Long.MAX_VALUE
+                    ? "Key renewed, active until " + untilText(until, ZoneId.systemDefault(), Locale.getDefault()) + "."
+                    : "Key renewed.";
+            mc.player.sendSystemMessage(tag().append(Component.literal(text).withStyle(ChatFormatting.GREEN)));
+        }
+        long warn = warnMs(windowMs);
+        if (until != 0L && until != Long.MAX_VALUE && left > 0 && left <= warn && warnedFor != until) {
             warnedFor = until;
             mc.player.sendSystemMessage(tag()
                     .append(Component.literal("Your key runs out in " + Math.max(1, left / 60_000L) + " min. ").withStyle(ChatFormatting.YELLOW))
@@ -174,7 +218,7 @@ public final class SkyAhKey {
         // Ask for the key state while it matters: near or after the end, or
         // after the player opened the website to renew it.
         long every = now < pollUntil ? 20_000L : 60_000L;
-        boolean relevant = now < pollUntil || (until != 0L && until != Long.MAX_VALUE && left < 15 * 60_000L);
+        boolean relevant = now < pollUntil || (until != 0L && until != Long.MAX_VALUE && left < warn + 5 * 60_000L);
         if (relevant && now - lastRequest >= every) {
             lastRequest = now;
             s.send("{\"type\":\"key\"}");

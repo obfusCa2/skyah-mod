@@ -4,9 +4,9 @@ Fabric mod for Hypixel SkyBlock. Shows the auction deals [SkyAH](https://skyah.n
 
 ## Download
 
-- Minecraft 26.3: [skyah-mod-0.3.1-mc26.3.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.1/skyah-mod-0.3.1-mc26.3.jar)
-- Minecraft 26.2: [skyah-mod-0.3.1-mc26.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.1/skyah-mod-0.3.1-mc26.2.jar)
-- Minecraft 26.1.2: [skyah-mod-0.3.1-mc26.1.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.1/skyah-mod-0.3.1-mc26.1.2.jar)
+- Minecraft 26.3: [skyah-mod-0.3.2-mc26.3.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.2/skyah-mod-0.3.2-mc26.3.jar)
+- Minecraft 26.2: [skyah-mod-0.3.2-mc26.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.2/skyah-mod-0.3.2-mc26.2.jar)
+- Minecraft 26.1.2: [skyah-mod-0.3.2-mc26.1.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.2/skyah-mod-0.3.2-mc26.1.2.jar)
 
 Same files as on [skyah.net/api](https://skyah.net/api). SHA-256 checksums are on the [release page](https://github.com/obfusCa2/skyah-mod/releases).
 

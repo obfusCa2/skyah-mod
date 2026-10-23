@@ -1,6 +1,7 @@
 package net.skyah.mod;
 
 import com.google.gson.Gson;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -9,6 +10,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,12 +25,21 @@ import java.util.Map;
  *
  *  Checked every rendered frame (a few ms resolution), only while one deal is
  *  being tracked. Auctions (bids) are skipped. One "open" message per deal,
- *  sent when the result is known or the view closes. */
+ *  sent when the result is known or the view closes.
+ *
+ *  An auction view that shows no buy button we know for a while is reported
+ *  once (title and item names only), at most 3 times per session. */
 public final class SkyAhOpenTracker {
     private static final Gson GSON = new Gson();
     private static final long OPEN_TIMEOUT_MS = 15_000L;
     /** Wait this long after the view closed for the next screen (confirm?). */
     private static final long CLOSE_GRACE_MS = 300L;
+    /** Auction view on screen this long without a known buy button: unreadable. */
+    private static final long UNREADABLE_MS = 1_500L;
+    private static final int UNREADABLE_MAX = 3;
+    private static final long UNREADABLE_GAP_MS = 10 * 60_000L;
+    private static int unreadableSent = 0;
+    private static long unreadableAt = 0L;
 
     private static Flip flip;
     private static String via = "";
@@ -41,6 +52,10 @@ public final class SkyAhOpenTracker {
     private static String buyItem;
     private static String buyName;
     private static int buySlot = -1;
+    /** The screen that was open when the deal was requested (never reported). */
+    private static Screen openBefore;
+    private static long viewSeenAt;
+    private static boolean unreadable;
 
     private SkyAhOpenTracker() {
     }
@@ -51,6 +66,7 @@ public final class SkyAhOpenTracker {
             send(closedAt > 0 ? "closed" : "replaced");
         }
         reset();
+        SkyAhHold.requested(f);
         if (f == null || !FlipChat.isBin(f) || f.auctionId == null || f.auctionId.isBlank()
                 || "test".equals(f.auctionId)) {
             return;
@@ -58,6 +74,7 @@ public final class SkyAhOpenTracker {
         flip = f;
         via = how;
         clickAt = System.currentTimeMillis();
+        openBefore = McCompat.screen(Minecraft.getInstance());
     }
 
     /** Every rendered frame of a container screen. */
@@ -73,18 +90,32 @@ public final class SkyAhOpenTracker {
                 return;
             }
             // Hypixel: "BIN Auction View"; the item must be the deal we opened.
-            if (!s.getTitle().getString().contains("Auction View") || !SkyAhPanel.showsItem(cs, flip.name)) {
+            String title = s.getTitle().getString();
+            if (!title.contains("Auction View")) {
                 return;
             }
-            String first = scan(cs, flip.name);
+            boolean item = SkyAhPanel.showsItem(cs, flip.name);
+            String first = item ? scan(cs, flip.name) : null;
             if (first == null) {
-                return; // buy button not sent yet
+                // Buy button not sent yet, or one we do not know. A view that was
+                // already open stays when the auction is gone: not unreadable.
+                if (s != openBefore) {
+                    if (viewSeenAt == 0L) {
+                        viewSeenAt = now;
+                    } else if (!unreadable && now - viewSeenAt > UNREADABLE_MS) {
+                        unreadable = true;
+                        reportUnreadable(cs, title, item);
+                        SkyAhHold.unreadable(flip);
+                    }
+                }
+                return;
             }
             screen = s;
             openAt = now;
             state = first;
             SkyAhLog.add("open: " + flip.name + " " + first + " after " + (openAt - clickAt) + "ms ("
                     + buyItem + " '" + buyName + "' slot " + buySlot + ")");
+            SkyAhHold.state(flip, first);
             if ("sold".equals(first)) {
                 send("sold");
             }
@@ -96,6 +127,7 @@ public final class SkyAhOpenTracker {
         if ("sold".equals(scan(cs, flip.name))) {
             soldAt = now;
             SkyAhLog.add("open: " + flip.name + " sold " + (soldAt - openAt) + "ms after opening");
+            SkyAhHold.state(flip, "sold");
             send("sold");
         }
     }
@@ -158,6 +190,46 @@ public final class SkyAhOpenTracker {
         return null;
     }
 
+    /** Title and the distinct item names in the menu (no panes), so a changed
+     *  auction view can be fixed. Small and rare: see UNREADABLE_MAX. */
+    private static void reportUnreadable(AbstractContainerScreen<?> cs, String title, boolean itemShown) {
+        long now = System.currentTimeMillis();
+        SkyAhLog.add("open: no known buy button for " + flip.name + " ('" + title + "')");
+        if (unreadableSent >= UNREADABLE_MAX || (unreadableAt > 0 && now - unreadableAt < UNREADABLE_GAP_MS)) {
+            return;
+        }
+        List<String> items = new ArrayList<>();
+        List<Slot> slots = cs.getMenu().slots;
+        int n = slots.size() > 36 ? slots.size() - 36 : slots.size();
+        for (int i = 0; i < n && items.size() < 12; i++) {
+            ItemStack stack = slots.get(i).getItem();
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            String id = String.valueOf(BuiltInRegistries.ITEM.getKey(stack.getItem()));
+            if (id.endsWith("glass_pane")) {
+                continue;
+            }
+            String entry = id + "|" + stack.getHoverName().getString();
+            if (!items.contains(entry)) {
+                items.add(entry);
+            }
+        }
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("type", "unreadable");
+        msg.put("auction_id", flip.auctionId);
+        msg.put("via", via);
+        msg.put("title", title);
+        msg.put("item_shown", itemShown);
+        msg.put("items", items);
+        msg.put("waited_ms", now - clickAt);
+        FlipsSocket socket = SkyAhMod.SOCKET;
+        if (socket != null && socket.send(GSON.toJson(msg))) {
+            unreadableSent++;
+            unreadableAt = now;
+        }
+    }
+
     private static void send(String ended) {
         if (flip == null || screen == null) {
             reset();
@@ -208,5 +280,8 @@ public final class SkyAhOpenTracker {
         buyItem = null;
         buyName = null;
         buySlot = -1;
+        openBefore = null;
+        viewSeenAt = 0L;
+        unreadable = false;
     }
 }

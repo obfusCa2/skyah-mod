@@ -54,13 +54,19 @@ public final class SkyAhHotkey {
             feedback(mc, "Hotkey works: it would open " + f.name + " (test deal)");
             return;
         }
+        open(mc, f, "hotkey");
+    }
+
+    /** Opens the auction view of a deal; via = "hotkey" or "hold". */
+    static void open(Minecraft mc, Flip f, String via) {
+        f.opened = true;
         SkyAhPanel.setPending(f);
-        SkyAhOpenTracker.requested(f, "hotkey");
+        SkyAhOpenTracker.requested(f, via);
         ClientPacketListener conn = mc.getConnection();
         if (conn != null) {
             conn.sendCommand("viewauction " + f.auctionId);
         }
-        SkyAhLog.add("hotkey: open " + f.name + " (" + (now - f.shownAt) / 1000 + "s old)");
+        SkyAhLog.add(via + ": open " + f.name + " (" + (System.currentTimeMillis() - f.shownAt) / 1000 + "s old)");
     }
 
     /** Action bar line, so the hotkey never spams chat. */

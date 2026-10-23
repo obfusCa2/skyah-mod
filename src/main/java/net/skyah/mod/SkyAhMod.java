@@ -31,9 +31,9 @@ import java.util.regex.Pattern;
 
 public class SkyAhMod implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("skyah");
-    public static final String VERSION = "0.3.1";
+    public static final String VERSION = "0.3.2";
     /** Build tag in the log, so a log shows which jar was running. */
-    public static final String BUILD = "gen22";
+    public static final String BUILD = "gen23";
     public static SkyAhConfig CONFIG;
     public static FlipsSocket SOCKET;
     /** Deal hotkey, unbound until the player picks a key (K menu or Controls). */
@@ -56,7 +56,8 @@ public class SkyAhMod implements ClientModInitializer {
     public void onInitializeClient() {
         CONFIG = SkyAhConfig.load();
         SOCKET = new FlipsSocket();
-        SkyAhLog.add("skyah " + VERSION + " " + BUILD + " started (enabled=" + CONFIG.enabled + ")");
+        SkyAhLog.add("skyah " + VERSION + " " + BUILD + " started (enabled=" + CONFIG.enabled
+                + (SkyAhHold.stamp().isEmpty() ? "" : ", test build " + SkyAhHold.stamp()) + ")");
         if (CONFIG.enabled) {
             SOCKET.start();
         }
@@ -71,8 +72,11 @@ public class SkyAhMod implements ClientModInitializer {
                 client.setScreenAndShow(new SkyAhConfigScreen());
             }
             while (OPEN_KEY.consumeClick()) {
-                SkyAhHotkey.openNext(client);
+                if (!SkyAhHold.pressed(client)) {
+                    SkyAhHotkey.openNext(client);
+                }
             }
+            SkyAhHold.poll(client);
             SkyAhPurse.tick(client);
             SkyAhOpenTracker.tick();
             if (++settingsTicks % 100 == 0) {
@@ -90,21 +94,29 @@ public class SkyAhMod implements ClientModInitializer {
             SkyAhOpenTracker.screenInit(screen);
             if (screen instanceof AbstractContainerScreen<?>) {
                 // Open measurement for BIN deals: checked every frame while tracked.
-                McCompat.afterScreenDraw(screen, (s, g) -> SkyAhOpenTracker.frame(s));
+                // Hold mode reads it right after, so a sold deal moves on within a frame.
+                McCompat.afterScreenDraw(screen, (s, g) -> {
+                    SkyAhOpenTracker.frame(s);
+                    SkyAhHold.poll(client);
+                });
                 ScreenEvents.remove(screen).register(SkyAhOpenTracker::removed);
                 // Key mappings do not fire while a menu is open; the AH is one.
                 ScreenKeyboardEvents.allowKeyPress(screen).register((s, e) -> {
                     if (!SkyAhHotkey.matchesInMenu(OPEN_KEY, e)) {
                         return true;
                     }
-                    SkyAhHotkey.openNext(client);
+                    if (!SkyAhHold.pressed(client)) {
+                        SkyAhHotkey.openNext(client);
+                    }
                     return false;
                 });
                 ScreenMouseEvents.allowMouseClick(screen).register((s, e) -> {
                     if (!SkyAhHotkey.matchesInMenu(OPEN_KEY, e)) {
                         return true;
                     }
-                    SkyAhHotkey.openNext(client);
+                    if (!SkyAhHold.pressed(client)) {
+                        SkyAhHotkey.openNext(client);
+                    }
                     return false;
                 });
             }
@@ -228,6 +240,9 @@ public class SkyAhMod implements ClientModInitializer {
         msg.put("soundMinProfit", CONFIG.soundMinProfit);
         msg.put("screenAlert", CONFIG.screenAlert);
         msg.put("screenAlertMinProfit", CONFIG.screenAlertMinProfit);
+        msg.put("holdMode", CONFIG.holdMode);
+        msg.put("holdAfterMs", CONFIG.holdAfterMs);
+        msg.put("holdDelayMs", CONFIG.holdDelayMs);
         msg.put("clickAction", CONFIG.clickAction);
         msg.put("showBin", CONFIG.showBin);
         msg.put("showAuctions", CONFIG.showAuctions);

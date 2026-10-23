@@ -39,7 +39,7 @@ public class SkyAhConfigScreen extends SkyAhScreen {
 
         if (SkyAhKey.needsActivation()) {
             button(X, y, W, Component.literal(SkyAhKey.isInactive() ? "Activate key on skyah.net/api" : "Renew key on skyah.net/api")
-                    .withStyle(ChatFormatting.YELLOW), SkyAhKey.ACTIVATE_TIP, b -> SkyAhKey.openWebsite(this));
+                    .withStyle(ChatFormatting.YELLOW), SkyAhKey.activateTip(), b -> SkyAhKey.openWebsite(this));
             y += GAP;
         }
         toggle(X, y, half(), "Deals in chat",
@@ -96,6 +96,10 @@ public class SkyAhConfigScreen extends SkyAhScreen {
                         + "it shows the best one with +N more. Use at your own risk.",
                 () -> setAlert(cfg, SkyAhNum.nextStep(alertValue(cfg), ALERT_STEPS)),
                 () -> setAlert(cfg, SkyAhNum.prevStep(alertValue(cfg), ALERT_STEPS)));
+        y += H + 3;
+        button(X, y, W, SkyAhHoldScreen.label(cfg),
+                "Hold the deal hotkey to skip sold deals. Use at your own risk.",
+                b -> open(new SkyAhHoldScreen(this)));
         y += H + 3;
         text(X, y, this::hotkeyHint);
         y += 12;
@@ -177,6 +181,10 @@ public class SkyAhConfigScreen extends SkyAhScreen {
                 out.append(other.get(i).copy().withStyle(ChatFormatting.RED));
             }
             return out.append(Component.literal(". Pick another key.").withStyle(ChatFormatting.RED));
+        }
+        if (SkyAhHold.enabled()) {
+            return Component.literal("Tap: newest deal. Hold: best deals in a row, skips sold ones.")
+                    .withStyle(ChatFormatting.DARK_GRAY);
         }
         return Component.literal("Each press opens the next newest deal you have not opened yet.")
                 .withStyle(ChatFormatting.DARK_GRAY);

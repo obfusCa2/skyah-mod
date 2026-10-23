@@ -20,5 +20,8 @@
     "fabric-api": "*",
     "minecraft": "~${minecraft_version}",
     "java": ">=25"
+  },
+  "custom": {
+    "skyah:build_stamp": "${build_stamp}"
   }
 }

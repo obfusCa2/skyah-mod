@@ -6,7 +6,11 @@ plugins {
 // Minecraft versions are distinguishable, e.g.:
 //   ./gradlew build -Pminecraft_version=26.2 -Pfabric_api_version=0.161.0+26.2
 //   ./gradlew build -Pminecraft_version=26.1.2 -Pfabric_api_version=0.155.3+26.1.2
-version = "${project.mod_version}+mc${project.minecraft_version}"
+// Test jars carry "-test" in the version and the jar name and log their build
+// time, so a log shows which test jar was running. Release builds stay plain.
+def testBuild = project.test_build.toBoolean()
+def buildStamp = testBuild ? new Date().format('yyyy-MM-dd HH:mm', TimeZone.getTimeZone('UTC')) + ' UTC' : ''
+version = "${project.mod_version}${testBuild ? '-test' : ''}+mc${project.minecraft_version}"
 group = project.maven_group
 
 base {
@@ -15,11 +19,13 @@ base {
 
 // The few Minecraft API calls that differ between versions live in one small
 // class (McCompat) with a copy per version family: src/mc26_1 for 26.1.x,
-// src/mc26_2 for 26.2 and newer.
+// src/mc26_2 for 26.2.x, src/mc26_3 for 26.3 and newer.
+def compatDir = project.minecraft_version.startsWith('26.1') ? 'src/mc26_1/java'
+        : project.minecraft_version.startsWith('26.2') ? 'src/mc26_2/java' : 'src/mc26_3/java'
 sourceSets {
     main {
         java {
-            srcDir(project.minecraft_version.startsWith('26.1') ? 'src/mc26_1/java' : 'src/mc26_2/java')
+            srcDir(compatDir)
         }
     }
 }
@@ -50,6 +56,7 @@ processResources {
     inputs.property "version", project.version
     inputs.property "loader_version", project.loader_version
     inputs.property "minecraft_version", project.minecraft_version
+    inputs.property "build_stamp", buildStamp
     filesMatching("fabric.mod.json") {
         expand inputs.properties
     }
