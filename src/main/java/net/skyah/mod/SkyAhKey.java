@@ -42,10 +42,6 @@ public final class SkyAhKey {
     private SkyAhKey() {
     }
 
-    static boolean isKeyMessage(String json) {
-        return json.contains("\"type\":\"key\"");
-    }
-
     /** Called on the socket thread. */
     static void update(String json) {
         try {
@@ -126,7 +122,7 @@ public final class SkyAhKey {
 
     static boolean isInactive() {
         FlipsSocket s = SkyAhMod.SOCKET;
-        return s != null && !s.isOpen() && s.lastCloseCode == 4402;
+        return s != null && s.keyedRefused == 4402;
     }
 
     static boolean dueSoon() {
@@ -138,7 +134,7 @@ public final class SkyAhKey {
     static boolean needsActivation() {
         SkyAhConfig cfg = SkyAhMod.CONFIG;
         FlipsSocket s = SkyAhMod.SOCKET;
-        if (cfg == null || !cfg.enabled || !cfg.hasKey() || s == null) {
+        if (cfg == null || !SkyAhMod.connectionWanted() || !cfg.hasKey() || s == null) {
             return false;
         }
         return isInactive() || (s.isOpen() && dueSoon());
@@ -169,7 +165,7 @@ public final class SkyAhKey {
         }
         SkyAhConfig cfg = SkyAhMod.CONFIG;
         FlipsSocket s = SkyAhMod.SOCKET;
-        if (cfg == null || s == null || !cfg.enabled) {
+        if (cfg == null || s == null || !SkyAhMod.connectionWanted()) {
             return;
         }
         long now = System.currentTimeMillis();
@@ -179,9 +175,10 @@ public final class SkyAhKey {
                 Component key = SkyAhMod.MENU_KEY == null ? Component.literal("K")
                         : SkyAhMod.MENU_KEY.getTranslatedKeyMessage();
                 mc.player.sendSystemMessage(tag()
-                        .append(Component.literal("Welcome! Press ").withStyle(ChatFormatting.GRAY))
+                        .append(Component.literal("Welcome! Free mode: deals arrive "
+                                + FreeMode.delayText(FreeMode.delayS()) + " late. Press ").withStyle(ChatFormatting.GRAY))
                         .append(key.copy().withStyle(ChatFormatting.YELLOW))
-                        .append(Component.literal(" to paste your key.").withStyle(ChatFormatting.GRAY)));
+                        .append(Component.literal(" for live deals with a key.").withStyle(ChatFormatting.GRAY)));
             }
             return;
         }

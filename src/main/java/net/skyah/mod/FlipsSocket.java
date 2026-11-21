@@ -1,5 +1,7 @@
 package net.skyah.mod;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import net.minecraft.client.Minecraft;
 import org.java_websocket.WebSocket;
 import org.java_websocket.client.WebSocketClient;
@@ -22,6 +24,14 @@ public class FlipsSocket {
     private volatile long openedAt = 0L;
     public volatile int lastCloseCode = 0;
     public volatile String lastCloseReason = "";
+    /** 4401 or 4402 once the keyed feed refused the key (not accepted, inactive): the mod then
+     *  uses the free feed and sends the key along, and the server sends it back (4410) once the
+     *  key is active. 0 = use the keyed feed. Saving a key or Reconnect clears it. */
+    public volatile int keyedRefused = 0;
+    /** Close code of the free feed for a key that is active again: back to the keyed feed. */
+    static final int KEY_ACTIVE_CODE = 4410;
+    /** The current socket goes to the keyed feed. */
+    private volatile boolean keyed = false;
     public volatile long lastMessageAt = 0L;
     /** Smoothed WebSocket round trip (ms), -1 until the first pong. */
     public volatile long rttMs = -1L;
@@ -44,6 +54,9 @@ public class FlipsSocket {
         if (code == 1013) {
             return " (server full)";
         }
+        if (code == FreeMode.CLOSED_CODE) {
+            return " (free mode closed, get a key on skyah.net/api)";
+        }
         return " (closed " + code + ")";
     }
 
@@ -55,6 +68,9 @@ public class FlipsSocket {
     public synchronized void stop() {
         stopped = true;
         generation.incrementAndGet();
+        SkyAhBazaarRecorder.stopped();
+        SkyAhListings.ended("connection stopped");
+        FreeMode.reset();
         WebSocketClient c = client;
         client = null;
         if (c != null) {
@@ -68,12 +84,68 @@ public class FlipsSocket {
     public synchronized void restart() {
         stop();
         attempts = 0;
+        keyedRefused = 0;
         start();
+    }
+
+    /** Deals in chat switched on or off: another feed (keyed, or free with deals off), the same
+     *  data. The recorder keeps its queue over the switch. */
+    public synchronized void switchFeed() {
+        keyedRefused = 0;
+        attempts = 0;
+        if (stopped) {
+            start();
+            return;
+        }
+        SkyAhBazaarRecorder.disconnected();
+        SkyAhListings.ended("feed switch");
+        FreeMode.reset();
+        connect();
+    }
+
+    /** True between start() and stop(): the socket is open or reconnecting. */
+    public boolean running() {
+        return !stopped;
     }
 
     public boolean isOpen() {
         WebSocketClient c = client;
         return c != null && c.isOpen();
+    }
+
+    /** The url this connection uses: the configured one for the keyed feed, else the free feed. */
+    static String connectUrl() {
+        FlipsSocket s = SkyAhMod.SOCKET;
+        return feedUrl(s != null && s.keyedRefused != 0);
+    }
+
+    private static String feedUrl(boolean refused) {
+        SkyAhConfig cfg = SkyAhMod.CONFIG;
+        return FreeMode.feedUrl(cfg.effectiveUrl(), FreeMode.keyedFeed(cfg.hasKey(), cfg.enabled, refused), !cfg.enabled);
+    }
+
+    /** The "type" of a control frame from the server, null for deal frames
+     *  (they have none) and anything unreadable. */
+    static String frameType(String json) {
+        if (json == null || !json.contains("\"type\"")) {
+            return null;
+        }
+        try {
+            JsonElement root = JsonParser.parseString(json);
+            if (!root.isJsonObject()) {
+                return null;
+            }
+            JsonElement t = root.getAsJsonObject().get("type");
+            return t != null && t.isJsonPrimitive() ? t.getAsString() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Control frames this build has no use for (sent to other builds of the mod): dropped quietly,
+     *  before the deal parser sees them. */
+    static boolean ignored(String type) {
+        return "bz_coach".equals(type) || "dbg_on".equals(type);
     }
 
     /** Best-effort client -> server message (settings, purchases, open timings, key state requests). */
@@ -100,8 +172,12 @@ public class FlipsSocket {
             }
         }
         try {
-            String url = SkyAhMod.CONFIG.effectiveUrl();
-            String key = SkyAhMod.CONFIG.apiKey == null ? "" : SkyAhMod.CONFIG.apiKey.trim();
+            SkyAhConfig cfg = SkyAhMod.CONFIG;
+            keyed = FreeMode.keyedFeed(cfg.hasKey(), cfg.enabled, keyedRefused != 0);
+            String url = feedUrl(keyedRefused != 0);
+            // The key goes along to the free feed too: the server then knows the account and
+            // sends the mod back once the key is active.
+            String key = cfg.apiKey == null ? "" : cfg.apiKey.trim();
             if (!key.isEmpty()) {
                 SkyAhLog.add("using key (" + key.length() + " chars)");
             }
@@ -122,7 +198,10 @@ public class FlipsSocket {
                         return;
                     }
                     openedAt = System.currentTimeMillis();
+                    FreeMode.reset();
+                    SkyAhListings.ended("new connection");
                     SkyAhLog.add("connected [" + SkyAhMod.BUILD + "]: " + shown);
+                    SkyAhBazaarRecorder.connected();
                     SkyAhMod.sendSettings(true);
                     startPinger(gen, this);
                 }
@@ -144,12 +223,30 @@ public class FlipsSocket {
                     if (gen != generation.get()) {
                         return;
                     }
-                    if (SkyAhKey.isKeyMessage(message)) {
+                    // Control frames by their type; unknown types fall through
+                    // to the deal parser, which drops frames without a deal.
+                    String type = frameType(message);
+                    if ("key".equals(type)) {
                         SkyAhKey.update(message);
                         return;
                     }
-                    if (message.contains("\"type\":\"version\"")) {
+                    if ("version".equals(type)) {
                         SkyAhMod.versionMessage(message);
+                        return;
+                    }
+                    if ("bz_on".equals(type)) {
+                        SkyAhBazaarRecorder.serverOn();
+                        return;
+                    }
+                    if ("free".equals(type)) {
+                        FreeMode.hello(message);
+                        return;
+                    }
+                    if ("ah_on".equals(type)) {
+                        SkyAhListings.serverOn();
+                        return;
+                    }
+                    if (ignored(type)) {
                         return;
                     }
                     long receivedAt = System.currentTimeMillis();
@@ -168,7 +265,8 @@ public class FlipsSocket {
                         // Counted even when hidden: the settings screens show
                         // how many incoming deals the filters keep.
                         FlipChat.received(flip);
-                        if (replayFrame && !SkyAhMod.CONFIG.showReplay) {
+                        // Deals in chat switched off while this frame was on its way: nothing shows.
+                        if (!SkyAhMod.CONFIG.enabled || replayFrame && !SkyAhMod.CONFIG.showReplay) {
                             return;
                         }
                         FlipChat.show(flip);
@@ -185,6 +283,9 @@ public class FlipsSocket {
                     }
                     lastCloseCode = code;
                     lastCloseReason = reason == null ? "" : reason;
+                    SkyAhBazaarRecorder.disconnected();
+                    SkyAhListings.ended("disconnected");
+                    FreeMode.reset();
                     // The server accepts and then closes rejected keys, so
                     // only a connection that lasted resets the backoff.
                     if (openedAt > 0L && System.currentTimeMillis() - openedAt > 30_000L) {
@@ -193,13 +294,26 @@ public class FlipsSocket {
                     openedAt = 0L;
                     SkyAhLog.add("closed: " + code
                             + (reason == null || reason.isBlank() ? "" : " " + reason));
+                    boolean fast = false;
+                    if (keyed && (code == 4401 || code == 4402)) {
+                        keyedRefused = code;
+                        fast = true;
+                        SkyAhLog.add(code == 4402 ? "key inactive: free feed until it is activated"
+                                : "key not accepted: free feed");
+                    } else if (code == KEY_ACTIVE_CODE) {
+                        keyedRefused = 0;
+                        fast = true;
+                        SkyAhLog.add("key active: back to live deals");
+                    }
                     if (code == 4401) {
                         SkyAhLog.add("auth failed: check your API key in /skyah menu");
                     } else if (code == 4409) {
                         SkyAhLog.add("key in use: closing stale sockets should free it");
+                    } else if (code == FreeMode.CLOSED_CODE) {
+                        SkyAhLog.add("free mode closed on the server: a key on skyah.net/api gives live deals");
                     }
                     if (!stopped) {
-                        scheduleReconnect(gen);
+                        scheduleReconnect(gen, fast);
                     }
                 }
 
@@ -217,7 +331,7 @@ public class FlipsSocket {
             c.connect();
         } catch (Exception e) {
             SkyAhLog.add("connect failed: " + e.getMessage());
-            scheduleReconnect(gen);
+            scheduleReconnect(gen, false);
         }
     }
 
@@ -242,13 +356,19 @@ public class FlipsSocket {
         t.start();
     }
 
-    private void scheduleReconnect(long gen) {
+    private void scheduleReconnect(long gen, boolean fast) {
         if (stopped) {
             return;
         }
         int delaySec;
-        if (lastCloseCode == 4409) {
+        if (fast && attempts < 4) {
+            // Switching between the keyed and the free feed; a loop falls back to the backoff below.
+            delaySec = 1;
+        } else if (lastCloseCode == 4409) {
             delaySec = 15;
+        } else if (lastCloseCode == FreeMode.CLOSED_CODE) {
+            // Free feed switched off: check back now and then. Saving a key connects at once.
+            delaySec = Math.min(300, 30 << Math.min(attempts, 4));
         } else if (lastCloseCode == 4401 || lastCloseCode == 4402) {
             // No, wrong or inactive key: fast retries cannot fix that. Saving
             // a key or Reconnect in the menu still connects right away.

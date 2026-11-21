@@ -6,6 +6,7 @@
   "description": "Live SkyAH auction deals in your chat.",
   "authors": ["SkyAH"],
   "license": "MIT",
+  "icon": "assets/skyah/icon.png",
   "contact": {
     "homepage": "https://skyah.net/api",
     "sources": "https://github.com/obfusCa2/skyah-mod"

@@ -22,6 +22,9 @@ import java.util.Map;
  *  - state: buy button at first sight: gold = "buyable", potato = "sold"
  *  - sold_after_ms: it was buyable and turned into a potato while open, that
  *    many ms after opening (someone else bought it first)
+ *  - bed_ms: a brand new BIN listing shows a red bed instead of the buy button
+ *    ("Can buy in: 14s"); that is a wait, not an unreadable view. The state is
+ *    then the button that follows the bed, bed_ms how long the bed was shown.
  *
  *  Checked every rendered frame (a few ms resolution), only while one deal is
  *  being tracked. Auctions (bids) are skipped. One "open" message per deal,
@@ -37,6 +40,12 @@ public final class SkyAhOpenTracker {
     /** Auction view on screen this long without a known buy button: unreadable. */
     private static final long UNREADABLE_MS = 1_500L;
     private static final int UNREADABLE_MAX = 3;
+    /** The buy lock of a new listing is 20 s; a bed shown much longer is something else. */
+    private static final long BED_MAX_MS = 30_000L;
+    /** A deal sent with its buy time is waited for at most this long after the click. */
+    private static final long LOCK_WAIT_MAX_MS = 30_000L;
+    /** "Can buy in" is read from the lore at most this often. */
+    private static final long LOCK_READ_MS = 250L;
     private static final long UNREADABLE_GAP_MS = 10 * 60_000L;
     private static int unreadableSent = 0;
     private static long unreadableAt = 0L;
@@ -56,6 +65,11 @@ public final class SkyAhOpenTracker {
     private static Screen openBefore;
     private static long viewSeenAt;
     private static boolean unreadable;
+    /** Red bed: first seen, when it turned into a buy button, and the lock end read from the lore. */
+    private static long bedSeenAt;
+    private static long bedEndAt;
+    private static long bedUntil;
+    private static long lockReadAt;
 
     private SkyAhOpenTracker() {
     }
@@ -95,14 +109,14 @@ public final class SkyAhOpenTracker {
                 return;
             }
             boolean item = SkyAhPanel.showsItem(cs, flip.name);
-            String first = item ? scan(cs, flip.name) : null;
+            String first = item ? scan(cs, flip.name, now) : null;
             if (first == null) {
                 // Buy button not sent yet, or one we do not know. A view that was
                 // already open stays when the auction is gone: not unreadable.
                 if (s != openBefore) {
                     if (viewSeenAt == 0L) {
                         viewSeenAt = now;
-                    } else if (!unreadable && now - viewSeenAt > UNREADABLE_MS) {
+                    } else if (!unreadable && now > unreadableAfter(flip, viewSeenAt, clickAt)) {
                         unreadable = true;
                         reportUnreadable(cs, title, item);
                         SkyAhHold.unreadable(flip);
@@ -113,6 +127,14 @@ public final class SkyAhOpenTracker {
             screen = s;
             openAt = now;
             state = first;
+            if ("wait".equals(first)) {
+                bedSeenAt = now;
+                SkyAhLog.add("open: " + flip.name + " in its buy lock after " + (openAt - clickAt) + "ms"
+                        + (bedUntil > 0 ? ", buyable in about " + Math.max(0, bedUntil - now) / 1000 + "s" : "")
+                        + " (" + buyItem + " slot " + buySlot + ")");
+                SkyAhHold.state(flip, "wait");
+                return;
+            }
             SkyAhLog.add("open: " + flip.name + " " + first + " after " + (openAt - clickAt) + "ms ("
                     + buyItem + " '" + buyName + "' slot " + buySlot + ")");
             SkyAhHold.state(flip, first);
@@ -124,7 +146,25 @@ public final class SkyAhOpenTracker {
         if (s != screen || soldAt > 0) {
             return;
         }
-        if ("sold".equals(scan(cs, flip.name))) {
+        String seen = scan(cs, flip.name, now);
+        if ("wait".equals(state)) {
+            // Waiting on the bed: the buy button (or a potato) follows it.
+            if ("buyable".equals(seen) || "sold".equals(seen)) {
+                state = seen;
+                bedEndAt = now;
+                SkyAhLog.add("open: " + flip.name + " lock over after " + (bedEndAt - bedSeenAt) + "ms: " + seen);
+                SkyAhHold.state(flip, seen);
+                if ("sold".equals(seen)) {
+                    send("sold");
+                }
+            } else if (!unreadable && now - bedSeenAt > BED_MAX_MS) {
+                unreadable = true;
+                SkyAhLog.add("open: " + flip.name + " still shows the bed after " + BED_MAX_MS / 1000 + "s");
+                SkyAhHold.unreadable(flip);
+            }
+            return;
+        }
+        if ("sold".equals(seen)) {
             soldAt = now;
             SkyAhLog.add("open: " + flip.name + " sold " + (soldAt - openAt) + "ms after opening");
             SkyAhHold.state(flip, "sold");
@@ -159,8 +199,47 @@ public final class SkyAhOpenTracker {
         }
     }
 
-    /** "buyable" (gold), "sold" (potato) or null (no buy button yet). Fills buyItem/Name/Slot. */
-    private static String scan(AbstractContainerScreen<?> cs, String dealName) {
+    /** When an auction view without a known button counts as unreadable: after
+     *  UNREADABLE_MS, and for a deal sent with its buy time not before that
+     *  time (at most LOCK_WAIT_MAX_MS after the click). */
+    static long unreadableAfter(Flip f, long viewSeen, long click) {
+        long after = viewSeen + UNREADABLE_MS;
+        long lockEnd = f == null || !f.preApi ? 0L : f.buyableAtLocal();
+        if (lockEnd > 0L) {
+            after = Math.max(after, Math.min(lockEnd, click + LOCK_WAIT_MAX_MS) + UNREADABLE_MS);
+        }
+        return after;
+    }
+
+    /** Ms until the deal can be bought: from the "Can buy in" lore while its
+     *  view shows the bed, else from the buy time the server sent. -1 when it
+     *  is not locked (or nothing is known). */
+    static synchronized long lockLeftMs(Flip f, long now) {
+        if (f == null) {
+            return -1L;
+        }
+        if (f == flip && state != null) {
+            // The open view is read: it decides.
+            if (!"wait".equals(state)) {
+                return -1L;
+            }
+            if (bedUntil > 0L) {
+                return Math.max(0L, bedUntil - now);
+            }
+            long at = f.buyableAtLocal();
+            return at > 0L ? Math.max(0L, at - now) : 0L;
+        }
+        return f.locked(now) ? f.buyableAtLocal() - now : -1L;
+    }
+
+    /** The view of this deal shows the bed right now. */
+    static synchronized boolean onBed(Flip f) {
+        return f != null && f == flip && "wait".equals(state);
+    }
+
+    /** "buyable" (gold), "sold" (potato), "wait" (red bed: new listing, not
+     *  buyable yet) or null (no buy button yet). Fills buyItem/Name/Slot. */
+    private static String scan(AbstractContainerScreen<?> cs, String dealName, long now) {
         String deal = SkyAhPanel.normalized(dealName);
         List<Slot> slots = cs.getMenu().slots;
         // The last 36 slots are the player's own inventory.
@@ -174,20 +253,46 @@ public final class SkyAhOpenTracker {
                 continue; // the auctioned item itself (it may be gold or a potato)
             }
             Item item = stack.getItem();
+            String id = String.valueOf(BuiltInRegistries.ITEM.getKey(item));
             String result = null;
             if (item == Items.GOLD_INGOT || item == Items.GOLD_NUGGET || item == Items.GOLD_BLOCK) {
                 result = "buyable";
             } else if (item == Items.POTATO || item == Items.POISONOUS_POTATO || item == Items.BAKED_POTATO) {
                 result = "sold";
+            } else if (id.endsWith("_bed")) {
+                result = "wait";
             }
             if (result != null) {
-                buyItem = String.valueOf(BuiltInRegistries.ITEM.getKey(item));
+                buyItem = id;
                 buyName = stack.getHoverName().getString();
                 buySlot = i;
+                if ("wait".equals(result)) {
+                    readLock(slots, n, now);
+                }
                 return result;
             }
         }
         return null;
+    }
+
+    /** "Can buy in: 14s" from the menu's lore: the end of the buy lock on this clock. */
+    private static void readLock(List<Slot> slots, int n, long now) {
+        if (now - lockReadAt < LOCK_READ_MS) {
+            return;
+        }
+        lockReadAt = now;
+        for (int i = 0; i < n; i++) {
+            ItemStack stack = slots.get(i).getItem();
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            Long left = AhSensor.buyIn(McCompat.lore(stack));
+            if (left != null) {
+                long until = now + left * 1000L;
+                bedUntil = bedUntil == 0L ? until : Math.min(bedUntil, until);
+                return;
+            }
+        }
     }
 
     /** Title and the distinct item names in the menu (no panes), so a changed
@@ -248,7 +353,13 @@ public final class SkyAhOpenTracker {
         }
         msg.put("click_to_open_ms", Math.max(0, openAt - clickAt));
         if ("buyable".equals(state) && soldAt > 0) {
-            msg.put("sold_after_ms", soldAt - openAt);
+            msg.put("sold_after_ms", soldAt - (bedEndAt > 0 ? bedEndAt : openAt));
+        }
+        if (bedSeenAt > 0) {
+            msg.put("bed_ms", Math.max(0, (bedEndAt > 0 ? bedEndAt : end) - bedSeenAt));
+        }
+        if (flip.preApi) {
+            msg.put("pre_api", true);
         }
         msg.put("watched_ms", Math.max(0, end - openAt));
         msg.put("client_ms", openAt);
@@ -283,5 +394,9 @@ public final class SkyAhOpenTracker {
         openBefore = null;
         viewSeenAt = 0L;
         unreadable = false;
+        bedSeenAt = 0L;
+        bedEndAt = 0L;
+        bedUntil = 0L;
+        lockReadAt = 0L;
     }
 }

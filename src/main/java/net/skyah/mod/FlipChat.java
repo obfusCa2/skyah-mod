@@ -225,46 +225,29 @@ public class FlipChat {
         shown(flip);
     }
 
-    /** One chat line: profit, item, then the parts switched on in the settings. */
+    /** One chat line in the chosen style (see DealLine): the profit, the item and the parts switched on
+     *  in the settings. */
     public static MutableComponent line(Flip flip, SkyAhConfig cfg) {
         long profit = profitOf(flip, cfg);
         double pct = pctOf(flip, profit);
         ChatFormatting tier = ruleColor(cfg, profit, pct);
-
-        MutableComponent msg = Component.empty()
-                .append(Component.literal("[").withStyle(ChatFormatting.DARK_GRAY))
-                .append(Component.literal("SkyAH").withStyle(ChatFormatting.GOLD))
-                .append(Component.literal("] ").withStyle(ChatFormatting.DARK_GRAY))
-                .append(Component.literal(signed(profit)).withStyle(tier, ChatFormatting.BOLD));
-        if (cfg.showPct) {
-            msg.append(Component.literal(" " + pctText(pct)).withStyle(tier));
-        }
-        if (!isBin(flip)) {
-            msg.append(Component.literal(" AUCTION").withStyle(ChatFormatting.YELLOW));
-        }
-        msg.append(Component.literal(" ")).append(title(flip));
-        if (cfg.showPrice) {
-            msg.append(Component.literal(" " + fmt(flip.price)).withStyle(ChatFormatting.WHITE));
-        }
-        if (cfg.showTarget && flip.targetSellPrice != null) {
-            msg.append(Component.literal((cfg.showPrice ? " → " : " sell ") + fmt(flip.targetSellPrice))
-                    .withStyle(ChatFormatting.GRAY));
-        }
-        if (cfg.showFloor && flip.floor != null) {
-            boolean below = "below".equals(flip.floorVsTarget);
-            msg.append(Component.literal(" floor " + fmt(flip.floor))
-                    .withStyle(below ? ChatFormatting.RED : ChatFormatting.DARK_GRAY));
-        }
-        if (cfg.showVolume && flip.salesPerDay != null) {
-            // Yellow under 1 sale a day.
-            msg.append(Component.literal(" " + rate(flip.salesPerDay) + "/d")
-                    .withStyle(flip.salesPerDay < 1.0 ? ChatFormatting.YELLOW : ChatFormatting.DARK_GRAY));
-        }
-        if (cfg.showSellTime && flip.sellTimeS != null) {
-            msg.append(Component.literal(" ~" + duration(flip.sellTimeS)).withStyle(ChatFormatting.DARK_GRAY));
-        }
-        if (cfg.showFee && flip.fee != null) {
-            msg.append(Component.literal(" fee " + fmt(flip.fee)).withStyle(ChatFormatting.DARK_GRAY));
+        DealLine.Show show = new DealLine.Show(cfg.showPrice, cfg.showTarget, cfg.showPct, cfg.showFloor,
+                cfg.showVolume, cfg.showSellTime, cfg.showFee);
+        MutableComponent msg = Component.empty();
+        for (DealLine.Part p : DealLine.parts(flip, show, profit, pct, DealLine.classic(cfg.chatStyle))) {
+            if (p.title()) {
+                msg.append(title(flip));
+                continue;
+            }
+            MutableComponent part = Component.literal(p.text());
+            ChatFormatting color = DealLine.TIER.equals(p.color()) ? tier : p.color() == null ? null : byName(p.color());
+            if (color != null) {
+                part.withStyle(color);
+            }
+            if (p.bold()) {
+                part.withStyle(ChatFormatting.BOLD);
+            }
+            msg.append(part);
         }
 
         Style style = Style.EMPTY.withHoverEvent(new HoverEvent.ShowText(details(flip, cfg)));
@@ -305,6 +288,15 @@ public class FlipChat {
         if (flip.queueAhead != null) {
             row(t, "Cheaper listings ahead", Integer.toString(flip.queueAhead),
                     flip.queueAhead > 0 ? ChatFormatting.YELLOW : ChatFormatting.WHITE);
+        }
+        if (flip.preApi) {
+            long lock = flip.receivedAt > 0 && flip.buyableAtLocal() > 0
+                    ? Math.max(0L, (flip.buyableAtLocal() - flip.receivedAt + 999L) / 1000L) : -1L;
+            row(t, "Pre-API", "brand new listing" + (lock > 0 ? ", buyable " + lock + "s after it arrived"
+                    : lock == 0 ? ", buyable when it arrived" : ""), ChatFormatting.LIGHT_PURPLE);
+        }
+        if (flip.free && flip.delayedS > 0) {
+            row(t, "Free mode", "shown " + FreeMode.delayText((int) flip.delayedS) + " after live", ChatFormatting.GRAY);
         }
         if (flip.expectedProfit != null) {
             row(t, "Profit at target", profitText(flip, flip.expectedProfit), ChatFormatting.WHITE);

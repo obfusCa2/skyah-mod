@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /** Base for the settings screens: one centered column. Changes go into the
@@ -31,9 +32,20 @@ abstract class SkyAhScreen extends Screen {
     protected int H;
     protected int GAP;
     private final List<Txt> texts = new ArrayList<>();
+    private final List<Rule> rules = new ArrayList<>();
+    private final List<Tip> tips = new ArrayList<>();
     private long dirtyAt = 0L;
 
-    private record Txt(int x, int y, int w, Supplier<Component> text) {
+    /** right: x is the right edge of the text. */
+    private record Txt(int x, int y, int w, Supplier<Component> text, boolean right) {
+    }
+
+    /** A thin line from x1 to x2 (a block title's rule). */
+    private record Rule(int y, IntSupplier x1, IntSupplier x2) {
+    }
+
+    /** A hover area with a tooltip (rows of text that are no widget). */
+    private record Tip(int x, int y, int w, int h, Supplier<String> text) {
     }
 
     protected SkyAhScreen(String title, Screen parent) {
@@ -44,10 +56,12 @@ abstract class SkyAhScreen extends Screen {
     @Override
     protected final void init() {
         texts.clear();
-        W = Math.min(400, this.width - 32);
+        rules.clear();
+        tips.clear();
+        W = MenuLayout.width(this.width);
         X = (this.width - W) / 2;
-        H = this.height < 300 ? 18 : 20;
-        GAP = H + (this.height < 300 ? 3 : 4);
+        H = MenuLayout.buttonH(this.height);
+        GAP = MenuLayout.gap(this.height);
         build();
     }
 
@@ -73,13 +87,40 @@ abstract class SkyAhScreen extends Screen {
 
     /** One line of text, re-evaluated every frame. */
     protected void text(int x, int y, Supplier<Component> text) {
-        texts.add(new Txt(x, y, 0, text));
+        texts.add(new Txt(x, y, 0, text, false));
+    }
+
+    /** One line of text whose right edge is at x. */
+    protected void textRight(int x, int y, Supplier<Component> text) {
+        texts.add(new Txt(x, y, 0, text, true));
     }
 
     /** Wrapped paragraph; returns the height it takes. */
     protected int para(int x, int y, int w, Component text) {
-        texts.add(new Txt(x, y, w, () -> text));
-        return this.font.split(text, w).size() * 10;
+        texts.add(new Txt(x, y, w, () -> text, false));
+        return lines(text, w) * 10;
+    }
+
+    /** The lines a paragraph takes at this width. */
+    protected int lines(Component text, int w) {
+        return Math.max(1, this.font.split(text, w).size());
+    }
+
+    /** A block title like the side panels: a gray label, then a thin line up to the right part (or up
+     *  to stopAt when given, e.g. column titles). */
+    protected void head(int y, String label, Supplier<Component> right, int stopAt) {
+        text(X, y, () -> Component.literal(label).withStyle(ChatFormatting.GRAY));
+        if (right != null) {
+            textRight(X + W, y, right);
+        }
+        int from = X + this.font.width(label) + 4;
+        rules.add(new Rule(y + 4, () -> from, () -> stopAt > 0 ? stopAt
+                : X + W - (right == null ? 0 : this.font.width(right.get()) + 4)));
+    }
+
+    /** A tooltip for an area of plain text. */
+    protected void tipArea(int x, int y, int w, int h, Supplier<String> text) {
+        tips.add(new Tip(x, y, w, h, text));
     }
 
     /** Label left of a widget row, vertically centered on it. */
@@ -168,6 +209,19 @@ abstract class SkyAhScreen extends Screen {
     protected void beforeClose() {
     }
 
+    /** Builds the page again (labels and rows that depend on a switch or new data). */
+    void refresh() {
+        this.rebuildWidgets();
+    }
+
+    /** Closes the whole menu (back to the game), whatever the parent. */
+    protected void closeMenu() {
+        beforeClose();
+        cfg().save();
+        SkyAhMod.sendSettings();
+        super.onClose();
+    }
+
     @Override
     public void onClose() {
         beforeClose();
@@ -184,6 +238,13 @@ abstract class SkyAhScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
         super.extractRenderState(g, mouseX, mouseY, delta);
         g.centeredText(this.font, this.title.copy().withStyle(ChatFormatting.GOLD), this.width / 2, 8, WHITE);
+        for (Rule r : rules) {
+            int x1 = r.x1().getAsInt();
+            int x2 = r.x2().getAsInt();
+            if (x2 > x1) {
+                g.fill(x1, r.y(), x2, r.y() + 1, 0x50FFFFFF);
+            }
+        }
         for (Txt t : texts) {
             Component c = t.text.get();
             if (c == null) {
@@ -192,10 +253,19 @@ abstract class SkyAhScreen extends Screen {
             if (t.w > 0) {
                 g.textWithWordWrap(this.font, c, t.x, t.y, t.w, WHITE);
             } else {
-                g.text(this.font, c, t.x, t.y, WHITE);
+                g.text(this.font, c, t.right ? t.x - this.font.width(c) : t.x, t.y, WHITE);
             }
         }
         extra(g, mouseX, mouseY);
+        for (Tip t : tips) {
+            if (mouseX >= t.x() && mouseX < t.x() + t.w() && mouseY >= t.y() && mouseY < t.y() + t.h()) {
+                String s = t.text().get();
+                if (s != null && !s.isEmpty()) {
+                    g.setTooltipForNextFrame(this.font.split(Component.literal(s), 170), mouseX, mouseY);
+                }
+                break;
+            }
+        }
     }
 
     /** Extra drawing on top of the widgets (previews). */
@@ -226,27 +296,77 @@ abstract class SkyAhScreen extends Screen {
         return n * 10 + 6;
     }
 
-    static Component statusLine() {
+    /** The connection as the menu pages see it (see HomeProblems). */
+    static HomeProblems.Conn conn() {
         SkyAhConfig cfg = SkyAhMod.CONFIG;
         FlipsSocket socket = SkyAhMod.SOCKET;
         boolean open = socket != null && socket.isOpen();
+        int code = socket == null ? 0 : socket.lastCloseCode;
+        if (!cfg.hasKey()) {
+            if (open) {
+                return HomeProblems.Conn.FREE;
+            }
+            return code == FreeMode.CLOSED_CODE ? HomeProblems.Conn.FREE_CLOSED : HomeProblems.Conn.DOWN;
+        }
+        // Refused by the keyed feed: the free feed may be open meanwhile, the key still needs a fix.
+        if (socket != null && socket.keyedRefused == 4401) {
+            return HomeProblems.Conn.REJECTED;
+        }
+        if (SkyAhKey.isInactive()) {
+            return HomeProblems.Conn.INACTIVE;
+        }
+        if (open) {
+            return HomeProblems.Conn.OPEN;
+        }
+        return code == 4401 ? HomeProblems.Conn.REJECTED : code == 4409 ? HomeProblems.Conn.ELSEWHERE
+                : HomeProblems.Conn.DOWN;
+    }
+
+    /** "● Connected · key 1h 12m left · last deal 5s ago", or what is wrong. Short enough for the
+     *  narrowest page; the line under it names the fix. */
+    static Component statusLine() {
+        SkyAhConfig cfg = SkyAhMod.CONFIG;
+        FlipsSocket socket = SkyAhMod.SOCKET;
         MutableComponent out = Component.empty();
-        if (!cfg.enabled) {
+        if (!SkyAhMod.connectionWanted()) {
             return out.append(dot(ChatFormatting.GRAY)).append(Component.literal("Off: deals in chat are switched off")
                     .withStyle(ChatFormatting.GRAY));
         }
-        if (!cfg.hasKey()) {
-            return out.append(dot(ChatFormatting.YELLOW)).append(Component.literal("No key yet: open Account & key")
-                    .withStyle(ChatFormatting.YELLOW));
-        }
-        if (SkyAhKey.isInactive()) {
-            return out.append(dot(ChatFormatting.RED)).append(Component.literal("Key inactive: activate it on skyah.net/api (one bid)")
-                    .withStyle(ChatFormatting.RED));
-        }
-        if (!open) {
-            String why = socket == null ? "" : socket.lastCloseLabel();
-            return out.append(dot(ChatFormatting.RED)).append(Component.literal("Disconnected" + why)
-                    .withStyle(ChatFormatting.RED));
+        switch (conn()) {
+            case FREE -> {
+                out.append(dot(ChatFormatting.AQUA)).append(Component.literal("Free mode").withStyle(ChatFormatting.AQUA))
+                        .append(Component.literal(" · deals arrive " + FreeMode.delayText(FreeMode.delayS()) + " late")
+                                .withStyle(ChatFormatting.GRAY));
+                return lastDeal(out, socket);
+            }
+            case FREE_CLOSED -> {
+                return out.append(dot(ChatFormatting.YELLOW)).append(Component.literal("Free mode closed")
+                        .withStyle(ChatFormatting.YELLOW));
+            }
+            case INACTIVE -> {
+                if (onFreeFeed(socket)) {
+                    return lastDeal(freeNote(out.append(dot(ChatFormatting.RED))
+                            .append(Component.literal("Key inactive").withStyle(ChatFormatting.RED))), socket);
+                }
+                return out.append(dot(ChatFormatting.RED)).append(Component.literal("Key inactive: no deals until you activate it")
+                        .withStyle(ChatFormatting.RED));
+            }
+            case REJECTED -> {
+                out.append(dot(ChatFormatting.RED)).append(Component.literal("Key not accepted")
+                        .withStyle(ChatFormatting.RED));
+                return onFreeFeed(socket) ? lastDeal(freeNote(out), socket) : out;
+            }
+            case ELSEWHERE -> {
+                return out.append(dot(ChatFormatting.RED)).append(Component.literal("Disconnected: key in use in another game")
+                        .withStyle(ChatFormatting.RED));
+            }
+            case DOWN -> {
+                return out.append(dot(ChatFormatting.RED)).append(Component.literal(cfg.hasKey() || socket == null
+                        || socket.lastCloseCode == 0 ? "Disconnected, trying again" : "Disconnected"
+                        + socket.lastCloseLabel()).withStyle(ChatFormatting.RED));
+            }
+            default -> {
+            }
         }
         out.append(dot(ChatFormatting.GREEN)).append(Component.literal("Connected").withStyle(ChatFormatting.GREEN));
         String left = SkyAhKey.leftText();
@@ -254,13 +374,31 @@ abstract class SkyAhScreen extends Screen {
             out.append(Component.literal(" · key ").withStyle(ChatFormatting.GRAY))
                     .append(Component.literal(left + " left").withStyle(SkyAhKey.dueSoon() ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
         }
+        return lastDeal(out, socket);
+    }
+
+    /** The free feed is open (its hello came): deals arrive late, data still flows. */
+    private static boolean onFreeFeed(FlipsSocket socket) {
+        return socket != null && socket.isOpen() && FreeMode.active();
+    }
+
+    /** " · free mode, deals 60s late". */
+    private static MutableComponent freeNote(MutableComponent out) {
+        return out.append(Component.literal(" · free mode, deals " + FreeMode.delayText(FreeMode.delayS()) + " late")
+                .withStyle(ChatFormatting.GRAY));
+    }
+
+    /** " · last deal 5s ago", or " · deals in chat off". */
+    private static MutableComponent lastDeal(MutableComponent out, FlipsSocket socket) {
+        if (!SkyAhMod.CONFIG.enabled) {
+            return out.append(Component.literal(" · deals in chat off").withStyle(ChatFormatting.GRAY));
+        }
         long last = socket.lastMessageAt;
         if (last > 0) {
             long secs = Math.max(0, (System.currentTimeMillis() - last) / 1000);
             out.append(Component.literal(" · last deal " + (secs < 60 ? secs + "s" : secs / 60 + "m") + " ago")
                     .withStyle(ChatFormatting.GRAY));
         }
-        out.append(Component.literal(" · " + SkyAhStats.shownCount() + " deals shown").withStyle(ChatFormatting.GRAY));
         return out;
     }
 

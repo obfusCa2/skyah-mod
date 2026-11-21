@@ -17,9 +17,10 @@ import java.util.function.ToLongFunction;
  *  you cannot buy it), the next best deal opens after a short random wait. The
  *  command goes out while the sold view is still open, like pressing the
  *  hotkey inside the AH: the server replaces the view (a command right after
- *  closing a menu is not answered). A gold nugget (buyable) stays open. It
- *  stops when the key is released, no deal is left (the sold view closes), or
- *  a view cannot be read.
+ *  closing a menu is not answered). A gold nugget (buyable) stays open. A red
+ *  bed (a new listing that cannot be bought for its first seconds) is waited
+ *  for until the buy button shows. It stops when the key is released, no deal
+ *  is left (the sold view closes), or a view cannot be read.
  *
  *  Main thread only: key events, client ticks and screen frames. */
 public final class SkyAhHold {
@@ -30,6 +31,10 @@ public final class SkyAhHold {
     private static final long VIEW_TIMEOUT_MS = 3_000L;
     /** At least this long between two commands, whatever the speed. */
     private static final long MIN_COMMAND_GAP_MS = 250L;
+    /** A deal sent with its buy time: no view until then is no reason to move on
+     *  (at most this long after opening it), plus a little slack. */
+    private static final long LOCK_WAIT_MAX_MS = 30_000L;
+    private static final long LOCK_SLACK_MS = 1_500L;
 
     private static long armedAt;
     private static InputConstants.Key key;
@@ -88,12 +93,20 @@ public final class SkyAhHold {
         nextAt = 0L;
     }
 
-    /** Buy button of the watched deal: "buyable" (gold) or "sold" (potato). */
+    /** Buy button of the watched deal: "buyable" (gold), "sold" (potato) or
+     *  "wait" (red bed, buyable in a few seconds: stays open). */
     static void state(Flip f, String state) {
         if (f != current) {
             return;
         }
         currentState = state;
+        if ("wait".equals(state)) {
+            nextAt = 0L;
+            if (armedAt > 0L && !stopped) {
+                SkyAhLog.add("hold: " + f.name + " not buyable yet, waiting for the buy button");
+            }
+            return;
+        }
         if ("sold".equals(state) && armedAt > 0L && !stopped) {
             long now = System.currentTimeMillis();
             nextAt = Math.max(now + jitter(delayMs()), lastCommandAt + MIN_COMMAND_GAP_MS);
@@ -139,7 +152,7 @@ public final class SkyAhHold {
             return;
         }
         if (currentState == null) {
-            if (now - currentAt < VIEW_TIMEOUT_MS) {
+            if (now < viewDeadline(current, currentAt)) {
                 return;
             }
             Screen open = McCompat.screen(mc);
@@ -151,13 +164,29 @@ public final class SkyAhHold {
                 return;
             }
             // No new view: the auction is gone. The next one replaces what is open.
-            SkyAhLog.add("hold: no view for " + current.name + " within 3s, next");
+            SkyAhLog.add("hold: no view for " + current.name + " within " + (now - currentAt) / 1000 + "s, next");
             queueStep(mc, false);
             return;
         }
         if ("sold".equals(currentState) && nextAt > 0L && now >= nextAt) {
             queueStep(mc, true);
         }
+    }
+
+    /** Until when no auction view is still fine: VIEW_TIMEOUT_MS after the
+     *  command, and for a deal sent with its buy time not before that time. */
+    static long viewDeadline(Flip f, long requestedAt) {
+        long at = requestedAt + VIEW_TIMEOUT_MS;
+        long lockEnd = f == null || !f.preApi ? 0L : f.buyableAtLocal();
+        if (lockEnd > 0L) {
+            at = Math.max(at, Math.min(lockEnd, requestedAt + LOCK_WAIT_MAX_MS) + LOCK_SLACK_MS);
+        }
+        return at;
+    }
+
+    /** Hold mode is running on this deal right now. */
+    static boolean holding(Flip f) {
+        return armedAt > 0L && !stopped && f != null && f == current;
     }
 
     /** Runs on the next frame, outside the screen's draw: the last step may

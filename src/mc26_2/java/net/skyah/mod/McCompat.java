@@ -5,8 +5,16 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.component.ItemLore;
 import org.lwjgl.glfw.GLFW;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /** Minecraft API calls that differ between versions. This copy is for
  *  26.2.x; build.gradle picks the copy that matches minecraft_version. */
@@ -19,6 +27,7 @@ final class McCompat {
     interface ScreenDraw {
         void draw(Screen screen, GuiGraphicsExtractor g);
     }
+
 
     /** System message in chat, or in the action bar when overlay is true. */
     static void systemMessage(Minecraft mc, Component message, boolean overlay) {
@@ -53,6 +62,21 @@ final class McCompat {
                 (s, g, mouseX, mouseY, delta) -> draw.draw(s, g));
     }
 
+    /** The GUI scale (screen pixels per GUI pixel). */
+    static int guiScale(Minecraft mc) {
+        return mc.getWindow() == null ? 0 : mc.getWindow().getGuiScale();
+    }
+
+    /** Draws what follows scaled by s around the origin, until popScale. */
+    static void pushScale(GuiGraphicsExtractor g, float s) {
+        g.pose().pushMatrix();
+        g.pose().scale(s, s);
+    }
+
+    static void popScale(GuiGraphicsExtractor g) {
+        g.pose().popMatrix();
+    }
+
     /** True while the key or mouse button is held, polled so it also works
      *  inside menus (key mappings stop updating there). */
     static boolean isDown(Minecraft mc, InputConstants.Key key) {
@@ -63,5 +87,42 @@ final class McCompat {
             return GLFW.glfwGetMouseButton(mc.getWindow().handle(), key.getValue()) == GLFW.GLFW_PRESS;
         }
         return key.getType() == InputConstants.Type.KEYSYM && InputConstants.isKeyDown(mc.getWindow(), key.getValue());
+    }
+
+    /** Lore lines of an item as text (formatting removed by the caller). */
+    static List<String> lore(ItemStack stack) {
+        ItemLore lore = stack.get(DataComponents.LORE);
+        List<String> out = new ArrayList<>();
+        if (lore != null) {
+            for (Component line : lore.lines()) {
+                out.add(line.getString());
+            }
+        }
+        return out;
+    }
+
+    /** The SkyBlock item id from the item's custom data, or null. */
+    static String skyblockId(ItemStack stack) {
+        return customString(stack, "id");
+    }
+
+    /** The item's own uuid from its custom data (unique items only), or null. */
+    static String skyblockUuid(ItemStack stack) {
+        return customString(stack, "uuid");
+    }
+
+    private static String customString(ItemStack stack, String key) {
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        if (data == null || data.isEmpty()) {
+            return null;
+        }
+        String value = data.copyTag().getStringOr(key, "");
+        return value.isEmpty() ? null : value;
+    }
+
+    /** Address of the server you play on, null in singleplayer. */
+    static String serverAddress(Minecraft mc) {
+        ServerData server = mc.getCurrentServer();
+        return server == null ? null : server.ip;
     }
 }

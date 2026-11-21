@@ -4,20 +4,20 @@ Fabric mod for Hypixel SkyBlock. Shows the auction deals [SkyAH](https://skyah.n
 
 ## Download
 
-- Minecraft 26.3: [skyah-mod-0.3.2-mc26.3.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.2/skyah-mod-0.3.2-mc26.3.jar)
-- Minecraft 26.2: [skyah-mod-0.3.2-mc26.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.2/skyah-mod-0.3.2-mc26.2.jar)
-- Minecraft 26.1.2: [skyah-mod-0.3.2-mc26.1.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.2/skyah-mod-0.3.2-mc26.1.2.jar)
+- Minecraft 26.3: [skyah-mod-0.3.3-mc26.3.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.3/skyah-mod-0.3.3-mc26.3.jar)
+- Minecraft 26.2: [skyah-mod-0.3.3-mc26.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.3/skyah-mod-0.3.3-mc26.2.jar)
+- Minecraft 26.1.2: [skyah-mod-0.3.3-mc26.1.2.jar](https://github.com/obfusCa2/skyah-mod/releases/download/v0.3.3/skyah-mod-0.3.3-mc26.1.2.jar)
 
 Same files as on [skyah.net/api](https://skyah.net/api). SHA-256 checksums are on the [release page](https://github.com/obfusCa2/skyah-mod/releases).
 
 ## Install
 
-1. Get a free key on [skyah.net/api](https://skyah.net/api). You need a linked Minecraft account.
-2. Put the jar for your Minecraft version in your `mods` folder. Updating? Delete the old SkyAH jar first.
+1. Put the jar for your Minecraft version in your `mods` folder. Updating? Delete the old SkyAH jar first.
    You also need Fabric Loader 0.19.5+, Fabric API and Java 25.
-3. Copy your key, start the game, press `K`, open **Account & key** and click **Paste key**.
+2. Start the game. Without a key, deals arrive a few seconds late.
+3. For live deals, get a free key on [skyah.net/api](https://skyah.net/api) (needs a linked Minecraft account), copy it, press `K`, open **Settings** and click **Paste key**.
 
-Commands: `/skyah test` shows two example deals, `/skyah status`, `/skyah logs`, `/skyah reconnect`.
+Commands: `/skyah` opens the menu, `/skyah help`, `/skyah test` shows two example deals, `/skyah status`, `/skyah logs`, `/skyah reconnect`.
 
 Use at your own risk.
 

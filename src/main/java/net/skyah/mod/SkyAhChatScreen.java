@@ -8,7 +8,8 @@ import net.minecraft.network.chat.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Chat line settings with a live preview, built by the same code as the real line. */
+/** Chat line settings with a live preview, built by the same code as the real line, in the chosen
+ *  style (classic or SkyAH). */
 public class SkyAhChatScreen extends SkyAhScreen {
     private static final long[] SOUND_STEPS = {-1L, 0L, 5_000_000L, 10_000_000L, 50_000_000L};
     private int previewY;
@@ -77,7 +78,19 @@ public class SkyAhChatScreen extends SkyAhScreen {
                 "Which color the profit gets, e.g. gold from 10M.",
                 b -> open(new SkyAhRulesScreen(this)));
         y += GAP;
-        button(X, y, W, "Done", null, b -> onClose());
+        button(X, y, half(), valued("Line style", styleLabel(cfg)),
+                "Classic: the item first, then cost -> target, the profit in brackets, lowest BIN and volume."
+                        + " SkyAH: the profit first, then the item and the numbers. The switches above work in both.",
+                b -> {
+                    cfg.chatStyle = DealLine.classic(cfg.chatStyle) ? DealLine.SKYAH : DealLine.CLASSIC;
+                    changed();
+                    b.setMessage(valued("Line style", styleLabel(cfg)));
+                });
+        button(right(), y, half(), "Done", null, b -> onClose());
+    }
+
+    private static String styleLabel(SkyAhConfig cfg) {
+        return DealLine.classic(cfg.chatStyle) ? "Classic" : "SkyAH";
     }
 
     private static long soundValue(SkyAhConfig cfg) {
@@ -108,7 +121,12 @@ public class SkyAhChatScreen extends SkyAhScreen {
         all.showVolume = all.showSellTime = true;
         all.colorRules = cfg().colorRules;
         all.useRealProfit = cfg().useRealProfit;
-        return chatBoxHeight(W, previewLines(all));
+        int h = 0;
+        for (String style : new String[] {DealLine.SKYAH, DealLine.CLASSIC}) {
+            all.chatStyle = style;
+            h = Math.max(h, chatBoxHeight(W, previewLines(all)));
+        }
+        return h;
     }
 
     @Override

@@ -7,7 +7,9 @@ import net.fabricmc.loader.api.FabricLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Settings, stored as JSON in config/skyah.json. */
 public class SkyAhConfig {
@@ -47,6 +49,13 @@ public class SkyAhConfig {
     public int holdAfterMs = 300;
     /** Wait about this long on a sold deal before the next one opens (ms). */
     public int holdDelayMs = 300;
+    /** Place, size and on/off of each panel on screen, by panel id (see PanelLayout). Missing = defaults. */
+    public Map<String, PanelLayout.Place> panels = new LinkedHashMap<>();
+    /** The single panel text scale of earlier test builds: moved into panels on load, never written. */
+    public Double panelScale = null;
+    /** The deal line in chat: absent or "skyah" = the profit first, "classic" = the item first, then
+     *  cost -> target and the profit in brackets (see DealLine). A fresh install starts with classic. */
+    public String chatStyle = null;
     // run | copy
     public String clickAction = "run";
     public boolean showBin = true;
@@ -147,9 +156,14 @@ public class SkyAhConfig {
         return r != null && r.minProfit == profit && r.minPct == pct;
     }
 
+    /** True when this start found no config file: a fresh install (see DealLine.initialStyle and the
+     *  first deal hotkey in SkyAhMod). */
+    static boolean fresh = false;
+
     public static SkyAhConfig load() {
+        boolean existed = Files.exists(PATH);
         try {
-            if (Files.exists(PATH)) {
+            if (existed) {
                 SkyAhConfig cfg = GSON.fromJson(Files.readString(PATH), SkyAhConfig.class);
                 if (cfg != null) {
                     if (cfg.wsUrl == null || cfg.wsUrl.isBlank()) {
@@ -171,9 +185,15 @@ public class SkyAhConfig {
                     if (cfg.blacklist == null) {
                         cfg.blacklist = "";
                     }
+                    boolean oldScale = cfg.panelScale != null;
+                    cfg.panels = PanelLayout.migrate(cfg.panels, cfg.panelScale);
+                    cfg.panelScale = null;
+                    if (oldScale) {
+                        SkyAhLog.add("config: panel scale moved into the deal panel's settings");
+                    }
                     int before = cfg.configVersion;
                     cfg.migrate();
-                    if (before != cfg.configVersion) {
+                    if (before != cfg.configVersion || oldScale) {
                         cfg.save();
                     }
                     SkyAhLog.add("config loaded: key "
@@ -185,6 +205,11 @@ public class SkyAhConfig {
         }
         SkyAhConfig cfg = new SkyAhConfig();
         cfg.configVersion = CURRENT_VERSION;
+        if (!existed) {
+            fresh = true;
+            cfg.chatStyle = DealLine.initialStyle(false);
+            SkyAhLog.add("config: first start, classic chat line");
+        }
         cfg.save();
         return cfg;
     }

@@ -2,11 +2,11 @@ package net.skyah.mod;
 
 import com.google.gson.Gson;
 import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
@@ -24,16 +24,18 @@ import net.minecraft.network.chat.Style;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class SkyAhMod implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("skyah");
-    public static final String VERSION = "0.3.2";
+    public static final String VERSION = "0.3.3";
     /** Build tag in the log, so a log shows which jar was running. */
-    public static final String BUILD = "gen23";
+    public static final String BUILD = "gen24";
     public static SkyAhConfig CONFIG;
     public static FlipsSocket SOCKET;
     /** Deal hotkey, unbound until the player picks a key (K menu or Controls). */
@@ -58,9 +60,7 @@ public class SkyAhMod implements ClientModInitializer {
         SOCKET = new FlipsSocket();
         SkyAhLog.add("skyah " + VERSION + " " + BUILD + " started (enabled=" + CONFIG.enabled
                 + (SkyAhHold.stamp().isEmpty() ? "" : ", test build " + SkyAhHold.stamp()) + ")");
-        if (CONFIG.enabled) {
-            SOCKET.start();
-        }
+        syncConnection();
         KeyMapping menuKey = MENU_KEY = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.skyah.menu", keyboardType(), InputConstants.KEY_K,
                 KeyMapping.Category.MISC));
@@ -79,6 +79,8 @@ public class SkyAhMod implements ClientModInitializer {
             SkyAhHold.poll(client);
             SkyAhPurse.tick(client);
             SkyAhOpenTracker.tick();
+            SkyAhBazaarRecorder.tick(client);
+            SkyAhListings.tick(client);
             if (++settingsTicks % 100 == 0) {
                 sendSettings(false);
             }
@@ -86,7 +88,10 @@ public class SkyAhMod implements ClientModInitializer {
         });
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (!overlay) {
-                maybePurchase(message.getString());
+                String text = message.getString();
+                maybePurchase(text);
+                SkyAhBazaarRecorder.chat(text);
+                SkyAhListings.chat(Minecraft.getInstance(), text);
             }
         });
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
@@ -122,7 +127,11 @@ public class SkyAhMod implements ClientModInitializer {
             }
         });
         registerCommands();
-        LOGGER.info("SkyAH mod initialized (ws={}, enabled={})", CONFIG.effectiveUrl(), CONFIG.enabled);
+        if (SkyAhConfig.fresh) {
+            // After the game loaded its key binds: a fresh install gets B as the deal hotkey.
+            ClientLifecycleEvents.CLIENT_STARTED.register(SkyAhMod::firstHotkey);
+        }
+        LOGGER.info("SkyAH mod initialized (ws={}, enabled={})", FlipsSocket.connectUrl(), CONFIG.enabled);
     }
 
     /** 26.3 renamed the enum constant KEYSYM -> KEYBOARD; accept both. */
@@ -178,6 +187,49 @@ public class SkyAhMod implements ClientModInitializer {
         }
         boolean sent = SOCKET.send(GSON.toJson(evt));
         SkyAhLog.add((sent ? "purchase sent: " : "purchase (offline): ") + name + " " + FlipChat.fmt(price));
+    }
+
+    /** Fresh install only (no config file at this start): binds the deal hotkey to B, unless it is bound
+     *  already or B is one of the other SkyAH keys. Existing installs keep theirs. */
+    private static void firstHotkey(Minecraft mc) {
+        List<String> own = new ArrayList<>();
+        if (MENU_KEY != null) {
+            own.add(MENU_KEY.saveString());
+        }
+        if (OPEN_KEY == null || !FirstStart.bindDefaultHotkey(true, OPEN_KEY.isUnbound(), own)) {
+            return;
+        }
+        OPEN_KEY.setKey(InputConstants.getKey(FirstStart.DEFAULT_HOTKEY));
+        KeyMapping.resetMapping();
+        if (mc.options != null) {
+            mc.options.save();
+        }
+        SkyAhLog.add("deal hotkey: " + OPEN_KEY.saveString() + " (first start)");
+    }
+
+    /** Deals in chat are on. The connection runs either way (with deals off on the free feed,
+     *  without deals): it also carries the market data. */
+    static boolean connectionWanted() {
+        SkyAhConfig cfg = CONFIG;
+        return cfg != null && cfg.enabled;
+    }
+
+    /** Starts the connection if it is not running. */
+    static void syncConnection() {
+        FlipsSocket s = SOCKET;
+        if (s != null && !s.running()) {
+            s.start();
+        }
+    }
+
+    /** Deals in chat on or off (the menu switch, /skyah toggle and /skyah flip). */
+    static void setDeals(boolean on) {
+        CONFIG.enabled = on;
+        CONFIG.save();
+        if (SOCKET != null) {
+            SOCKET.switchFeed();
+        }
+        SkyAhLog.add("deals in chat " + (on ? "on" : "off"));
     }
 
     /** {"type":"version","latest":"0.3.1"} from the server: shown in the K menu. */
@@ -274,8 +326,7 @@ public class SkyAhMod implements ClientModInitializer {
             java.util.List<String> lines = SkyAhLog.snapshot();
             mc.keyboardHandler.setClipboard(String.join(System.lineSeparator(), lines));
             if (mc.gui != null) {
-                McCompat.systemMessage(mc, Component.literal(
-                                "SkyAH logs copied (" + lines.size() + " lines)")
+                McCompat.systemMessage(mc, Component.literal("SkyAH logs copied (" + lines.size() + " lines)")
                         .withStyle(net.minecraft.ChatFormatting.GOLD), false);
             }
             return true;
@@ -293,8 +344,7 @@ public class SkyAhMod implements ClientModInitializer {
         if (mc == null || mc.gui == null) {
             return;
         }
-        McCompat.systemMessage(mc, Component.literal(
-                        "SkyAH logs (" + (lines.size() - from) + "/" + lines.size() + "):")
+        McCompat.systemMessage(mc, Component.literal("SkyAH logs (" + (lines.size() - from) + "/" + lines.size() + "):")
                 .withStyle(net.minecraft.ChatFormatting.GOLD), false);
         for (int i = from; i < lines.size(); i++) {
             McCompat.systemMessage(mc,
@@ -302,15 +352,40 @@ public class SkyAhMod implements ClientModInitializer {
         }
     }
 
+    private static int toggleDeals(net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource source) {
+        setDeals(!CONFIG.enabled);
+        source.sendFeedback(Component.literal("SkyAH: deals in chat " + (CONFIG.enabled ? "on" : "off")));
+        return 1;
+    }
+
     private void registerCommands() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
                 dispatcher.register(ClientCommands.literal("skyah")
+                        .executes(ctx -> {
+                            ctx.getSource().getClient().setScreenAndShow(new SkyAhConfigScreen());
+                            return 1;
+                        })
+                        .then(ClientCommands.literal("help").executes(ctx -> {
+                            for (String line : SkyAhCommands.help()) {
+                                ctx.getSource().sendFeedback(Component.literal(line).withStyle(ChatFormatting.GRAY));
+                            }
+                            return 1;
+                        }))
+                        .then(ClientCommands.literal("flip").executes(ctx -> toggleDeals(ctx.getSource())))
+                        .then(SkyAhCommands.listCommand("bl", true))
+                        .then(SkyAhCommands.listCommand("blacklist", true))
+                        .then(SkyAhCommands.listCommand("wl", false))
+                        .then(SkyAhCommands.listCommand("whitelist", false))
                         .then(ClientCommands.literal("status").executes(ctx -> {
                             ctx.getSource().sendFeedback(Component.literal(
                                     "SkyAH: " + (SOCKET.isOpen() ? "connected" : "disconnected")
-                                            + " | " + CONFIG.effectiveUrl().replaceAll("key=[^&]+", "key=***")
+                                            + " | " + FlipsSocket.connectUrl().replaceAll("key=[^&]+", "key=***")
                                             + " | minProfit " + FlipChat.fmt(CONFIG.minProfit)
                                             + " | " + (CONFIG.enabled ? "on" : "off")));
+                            return 1;
+                        }))
+                        .then(ClientCommands.literal("panels").executes(ctx -> {
+                            SkyAhPanelsScreen.open(ctx.getSource().getClient(), null);
                             return 1;
                         }))
                         .then(ClientCommands.literal("menu").executes(ctx -> {
@@ -335,22 +410,18 @@ public class SkyAhMod implements ClientModInitializer {
                             ctx.getSource().sendFeedback(Component.literal("SkyAH: reconnecting"));
                             return 1;
                         }))
-                        .then(ClientCommands.literal("toggle").executes(ctx -> {
-                            CONFIG.enabled = !CONFIG.enabled;
-                            CONFIG.save();
-                            if (CONFIG.enabled) {
-                                SOCKET.start();
-                            } else {
-                                SOCKET.stop();
-                            }
-                            ctx.getSource().sendFeedback(Component.literal(
-                                    "SkyAH: " + (CONFIG.enabled ? "on" : "off")));
-                            return 1;
-                        }))
+                        .then(ClientCommands.literal("toggle").executes(ctx -> toggleDeals(ctx.getSource())))
                         .then(ClientCommands.literal("minprofit")
-                                .then(ClientCommands.argument("coins", LongArgumentType.longArg(0))
+                                .then(ClientCommands.argument("coins", StringArgumentType.greedyString())
                                         .executes(ctx -> {
-                                            CONFIG.minProfit = LongArgumentType.getLong(ctx, "coins");
+                                            // 2m, 500k, 1.5b or plain coins.
+                                            long v = SkyAhNum.parseCoins(StringArgumentType.getString(ctx, "coins"), -1L);
+                                            if (v < 0) {
+                                                ctx.getSource().sendFeedback(Component.literal(
+                                                        "SkyAH: not a coin amount, e.g. /skyah minprofit 2m"));
+                                                return 0;
+                                            }
+                                            CONFIG.minProfit = v;
                                             CONFIG.save();
                                             sendSettings();
                                             ctx.getSource().sendFeedback(Component.literal(
@@ -391,6 +462,12 @@ public class SkyAhMod implements ClientModInitializer {
                         .then(ClientCommands.literal("profile")
                                 .executes(ctx -> {
                                     StringBuilder names = new StringBuilder();
+                                    for (SkyAhPresets.Preset p : SkyAhPresets.ALL) {
+                                        if (names.length() > 0) {
+                                            names.append(", ");
+                                        }
+                                        names.append(p.name());
+                                    }
                                     if (CONFIG.profiles != null) {
                                         for (SkyAhProfile p : CONFIG.profiles) {
                                             if (p == null || p.name == null) {
@@ -403,12 +480,22 @@ public class SkyAhMod implements ClientModInitializer {
                                         }
                                     }
                                     ctx.getSource().sendFeedback(Component.literal(
-                                            "SkyAH profiles: " + (names.length() == 0 ? "(none)" : names)));
+                                            "SkyAH profiles: " + names));
                                     return 1;
                                 })
                                 .then(ClientCommands.argument("name", StringArgumentType.greedyString())
                                         .executes(ctx -> {
                                             String name = StringArgumentType.getString(ctx, "name").trim();
+                                            for (SkyAhPresets.Preset p : SkyAhPresets.ALL) {
+                                                if (p.name().equalsIgnoreCase(name)) {
+                                                    SkyAhPresets.apply(p, CONFIG);
+                                                    CONFIG.save();
+                                                    sendSettings();
+                                                    ctx.getSource().sendFeedback(Component.literal(
+                                                            "SkyAH: profile applied: " + p.name()));
+                                                    return 1;
+                                                }
+                                            }
                                             SkyAhProfile hit = null;
                                             if (CONFIG.profiles != null) {
                                                 for (SkyAhProfile p : CONFIG.profiles) {
@@ -426,7 +513,7 @@ public class SkyAhMod implements ClientModInitializer {
                                             CONFIG.save();
                                             sendSettings();
                                             ctx.getSource().sendFeedback(Component.literal(
-                                                    "SkyAH: profile applied - " + hit.name));
+                                                    "SkyAH: profile applied: " + hit.name));
                                             return 1;
                                         })))
                         .then(ClientCommands.literal("key")

@@ -58,8 +58,11 @@ public final class SkyAhAlert {
     }
 
     private static Component subtitle(Flip flip) {
-        MutableComponent sub = Component.empty()
-                .append(FlipChat.title(flip))
+        MutableComponent sub = Component.empty();
+        if (flip.preApi) {
+            sub.append(Component.literal("PRE-API ").withStyle(ChatFormatting.LIGHT_PURPLE));
+        }
+        sub.append(FlipChat.title(flip))
                 .append(Component.literal(" for " + FlipChat.fmt(flip.price)).withStyle(ChatFormatting.GRAY));
         KeyMapping key = SkyAhMod.OPEN_KEY;
         if (key != null && !key.isUnbound()) {

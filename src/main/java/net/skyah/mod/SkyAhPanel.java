@@ -11,7 +11,8 @@ import net.minecraft.util.FormattedCharSequence;
 
 import java.util.List;
 
-/** Side panel shown next to the auction container after clicking a flip. */
+/** Side panel shown next to the auction container after clicking a flip. Its place, size and on/off
+ *  switch come from the panel settings (PanelLayout, edit mode in SkyAhPanelsScreen). */
 public final class SkyAhPanel {
     private static volatile Flip pending = null;
     private static volatile long pendingAt = 0L;
@@ -49,7 +50,7 @@ public final class SkyAhPanel {
 
     private static void draw0(Screen screen, GuiGraphicsExtractor g) {
         Flip f = pending;
-        if (f == null || !(screen instanceof AbstractContainerScreen<?> cs)) {
+        if (f == null || !(screen instanceof AbstractContainerScreen<?> cs) || !place().shown) {
             return;
         }
         if (System.currentTimeMillis() - pendingAt > MAX_AGE_MS) {
@@ -61,9 +62,10 @@ public final class SkyAhPanel {
         String want = normalized(f.name);
         boolean match = showsItem(cs, f.name);
         String seen = firstItemName(cs);
-        if (!match && screen.getTitle().getString().toLowerCase().contains("confirm")) {
-            // Hypixel's confirm screens don't contain the auctioned item; the
-            // freshly clicked auction is still the one being confirmed.
+        if (!match && AhSensor.auctionConfirmTitle(screen.getTitle().getString())) {
+            // Auction confirm screens don't contain the auctioned item; the
+            // freshly clicked auction is still the one being confirmed. Bazaar
+            // confirm screens are not auction screens and never match.
             match = true;
         }
         if (!match) {
@@ -74,28 +76,58 @@ public final class SkyAhPanel {
 
         Minecraft mc = Minecraft.getInstance();
         Font font = mc.font;
-        int w = 150;
-        // Sit right next to the container, vertically aligned with its top.
-        int rows = Math.max(1, Math.min(6, cs.getMenu().slots.size() / 9));
-        int cw = 176;
-        int ch = 114 + rows * 18;
-        int cx = (screen.width - cw) / 2;
-        int cy = (screen.height - ch) / 2;
-        int x = cx + cw + 6;
-        if (x + w > screen.width - 4) {
-            x = cx - w - 6;
+        // The whole panel is drawn at its own scale (see PanelScale and PanelLayout); everything below is in
+        // the panel's units (GUI pixels divided by sc). At 1.0 this is the old layout pixel for pixel.
+        PanelLayout.Place place = place();
+        float sc = PanelScale.effective(place.scale, McCompat.guiScale(mc));
+        int rows = cs.getMenu().slots.size() / 9;
+        Content c = content(font, f, System.currentTimeMillis());
+        int[] def = PanelLayout.dealDefault(screen.width, screen.height, rows, sc, W);
+        int[] at = PanelLayout.place(place, PanelLayout.units(screen.width, sc), PanelLayout.units(screen.height, sc),
+                W, c.h(), def[0], def[1]);
+        McCompat.pushScale(g, sc);
+        try {
+            paint(g, font, f, c, at[0], at[1]);
+        } finally {
+            McCompat.popScale(g);
         }
-        if (x < 4) {
-            x = 4;
-        }
-        int y = Math.max(4, cy);
+    }
+
+    /** Panel width in panel units. */
+    static final int W = 150;
+
+    /** The deal panel's settings (see PanelLayout). */
+    static PanelLayout.Place place() {
+        SkyAhConfig cfg = SkyAhMod.CONFIG;
+        return PanelLayout.get(cfg == null ? null : cfg.panels, PanelLayout.DEAL);
+    }
+
+    /** What the panel shows for a deal, measured once per frame: the name lines, the buy-in rows and the
+     *  height in panel units. */
+    record Content(List<FormattedCharSequence> nameLines, int nameDraw, long lockLeft, boolean lockRow,
+                   boolean holdRow, int h) {
+    }
+
+    static Content content(Font font, Flip f, long now) {
         Component name = f.nameFormatted != null && !f.nameFormatted.isBlank()
                 ? FlipChat.parseLegacy(f.nameFormatted)
                 : Component.literal(f.name != null ? f.name : "?");
-        List<FormattedCharSequence> nameLines = font.split(name, w - 12);
+        List<FormattedCharSequence> nameLines = font.split(name, W - 12);
         int nameDraw = Math.min(nameLines.size(), 2);
+        // New listing: how long until it can be bought (red bed in the view).
+        long lockLeft = SkyAhOpenTracker.lockLeftMs(f, now);
+        boolean bed = SkyAhOpenTracker.onBed(f);
+        boolean lockRow = bed || lockLeft > 0L;
+        boolean holdRow = lockRow && SkyAhHold.holding(f);
+        int h = 26 + nameDraw * 12 + (lockRow ? 12 : 0) + (holdRow ? 10 : 0) + 3 * 12 + 8 + 12 + 8;
+        return new Content(nameLines, nameDraw, lockLeft, lockRow, holdRow, h);
+    }
+
+    /** Draws the panel with its top left corner at x, y (panel units, inside the panel scale). */
+    static void paint(GuiGraphicsExtractor g, Font font, Flip f, Content c, int x, int y) {
+        int w = W;
+        int h = c.h();
         String id = f.auctionId == null ? "" : f.auctionId;
-        int h = 26 + nameDraw * 12 + 3 * 12 + 8 + 12 + 8;
 
         g.fill(x, y, x + w, y + h, 0xC0101010);
 
@@ -109,11 +141,25 @@ public final class SkyAhPanel {
             g.pose().popMatrix();
         }
         g.text(font, Component.literal("SkyAH").withStyle(ChatFormatting.AQUA), x + 6, y + 12, 0xFFFFFFFF);
+        if (f.preApi) {
+            String tag = "PRE-API";
+            g.text(font, Component.literal(tag).withStyle(ChatFormatting.LIGHT_PURPLE),
+                    x + w - 6 - font.width(tag), y + 12, 0xFFFFFFFF);
+        }
 
         int ly = y + 26;
-        for (int i = 0; i < nameDraw; i++) {
-            g.text(font, nameLines.get(i), x + 6, ly, 0xFFFFFFFF);
+        for (int i = 0; i < c.nameDraw(); i++) {
+            g.text(font, c.nameLines().get(i), x + 6, ly, 0xFFFFFFFF);
             ly += 12;
+        }
+
+        if (c.lockRow()) {
+            ly = row(g, font, x, ly, w, "Buy in", lockText(c.lockLeft()), ChatFormatting.YELLOW);
+            if (c.holdRow()) {
+                g.text(font, Component.literal("Hold mode waits for it").withStyle(ChatFormatting.GRAY),
+                        x + 6, ly, 0xFFFFFFFF);
+                ly += 10;
+            }
         }
 
         long profit = FlipChat.profitOf(f, SkyAhMod.CONFIG);
@@ -128,6 +174,11 @@ public final class SkyAhPanel {
         ly += 8;
         row(g, font, x, ly, w, "Profit",
                 FlipChat.signed(profit) + " (" + FlipChat.pctText(pct) + ")", pc);
+    }
+
+    /** "14s" while the lock runs, "soon" at its end or when the time is unknown. */
+    static String lockText(long leftMs) {
+        return leftMs >= 1_000L ? (leftMs + 999L) / 1_000L + "s" : "soon";
     }
 
     /** True when the container holds an item named like the flip. */
